@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>Uttoron Cultural Rehearsal</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="brand-bar">
+    <img src="logo.png" alt="Uttoron">
+    <div>
+      <p class="wordmark">Uttoron</p>
+      <p class="eyebrow">Cultural rehearsal · Samantha Smith Elementary Gym</p>
+    </div>
+  </header>
+
+  <main id="gate" class="gate">
+    <div class="gate-card">
+      <h1>Rehearsal booking</h1>
+      <p class="note">Parents and group coordinators register once, then book evening gym slots for Uttoron cultural programs. Cultural team approves requests. Admin manages events, teams, and usage.</p>
+      <p class="note">
+        <a class="facility-link" id="facility-maps" href="https://share.google/C8C33ynszqGr7fR40" target="_blank" rel="noopener">23305 NE 14th St, Sammamish, WA 98074</a>
+        · about $70 / 3-hour session
+      </p>
+      <button id="show-register" class="btn-orange" type="button">Register as coordinator</button>
+      <button id="show-login" class="btn-teal" type="button" style="margin-top:8px">Log in</button>
+      <button id="show-policy" class="btn-quiet" type="button" style="margin-top:8px">Facility usage policy</button>
+    </div>
+  </main>
+
+  <main id="policy-screen" class="screen" hidden>
+    <div class="panel">
+      <h1>UTT-CULT-001 · Facility usage policy</h1>
+      <p class="note">Summary of Uttoron’s cultural rehearsal rules. Full text is kept for coordinators to acknowledge at registration.</p>
+      <div class="policy" id="policy-body"></div>
+      <button id="policy-back" class="btn-quiet" type="button">Back</button>
+    </div>
+  </main>
+
+  <main id="register-screen" class="screen" hidden>
+    <form id="register-form" class="panel">
+      <h1>Coordinator registration</h1>
+      <p class="note">After you register, cultural team activates your login. Then you can create a performance group and request rehearsal slots.</p>
+      <p id="register-error" class="result bad" hidden></p>
+      <label>Full name <input id="reg-name" required autocomplete="name"></label>
+      <div class="row-2">
+        <label>Email <input id="reg-email" type="email" autocomplete="email"></label>
+        <label>Phone <input id="reg-phone" type="tel" autocomplete="tel"></label>
+      </div>
+      <div class="row-2">
+        <label>Username <input id="reg-username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+        <label>Password <input id="reg-password" type="password" required autocomplete="new-password"></label>
+      </div>
+      <label class="check-row">
+        <input id="reg-policy" type="checkbox" required>
+        <span>I acknowledge the facility usage policy: shared schedule, adult supervision, school property rules, and no independent fee collection in Uttoron’s name.</span>
+      </label>
+      <button class="btn-orange" type="submit">Create account</button>
+      <button id="register-back" class="text-button" type="button">Back</button>
+    </form>
+  </main>
+
+  <main id="login-screen" class="screen" hidden>
+    <form id="login-form" class="panel">
+      <h1>Log in</h1>
+      <p id="login-error" class="result bad" hidden></p>
+      <label>Username <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn-orange" type="submit">Log in</button>
+      <button id="login-back" class="text-button" type="button">Back</button>
+    </form>
+  </main>
+
+  <main id="workspace" class="screen" hidden>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow" id="who-role"></p>
+        <p id="who"></p>
+      </div>
+      <button id="logout" class="text-button" type="button">Log out</button>
+    </header>
+
+    <div class="page-tabs" id="page-tabs"></div>
+    <p id="flash" class="result ok" hidden style="margin:12px 18px 0"></p>
+
+    <section class="panel" data-page="home">
+      <h1>Home</h1>
+      <p class="note" id="home-blurb"></p>
+      <div class="stat-grid" id="home-stats"></div>
+      <div class="list" id="home-pending" style="margin-top:14px"></div>
+    </section>
+
+    <section class="panel" data-page="calendar" hidden>
+      <h1>Calendar &amp; booking</h1>
+      <p class="note">Pick an event, choose your group, then request an open hour inside a three-hour school rental. Cultural team approves requests.</p>
+      <div class="row-2">
+        <label>Event
+          <select id="cal-event"></select>
+        </label>
+        <label>Your group
+          <select id="cal-group"></select>
+        </label>
+      </div>
+      <div class="row-2">
+        <label>Kids / participants <input id="cal-kids" type="number" min="0" step="1" value="0"></label>
+        <label>Point of contact <input id="cal-poc" placeholder="Name / phone"></label>
+      </div>
+      <label>Special requirements (props, logistics, AV)
+        <textarea id="cal-reqs" placeholder="e.g. need props table and logistics help"></textarea>
+      </label>
+      <div id="cal-sessions" class="list"></div>
+    </section>
+
+    <section class="panel" data-page="groups" hidden>
+      <h1>Performance groups</h1>
+      <p class="note">Create the group you coordinate (children’s dance, drama, ensemble, etc.), then book slots from Calendar.</p>
+      <form id="group-form">
+        <div class="row-2">
+          <label>Event <select id="grp-event" required></select></label>
+          <label>Group name <input id="grp-name" required placeholder="Children's dance"></label>
+        </div>
+        <div class="row-2">
+          <label>Type
+            <select id="grp-type">
+              <option value="dance">Dance</option>
+              <option value="music">Music / ensemble</option>
+              <option value="drama">Drama / play</option>
+              <option value="recitation">Recitation / storytelling</option>
+              <option value="other">Other cultural</option>
+            </select>
+          </label>
+          <label>Age groups <input id="grp-ages" placeholder="kids 5–10"></label>
+        </div>
+        <div class="row-2">
+          <label>Est. participants <input id="grp-count" type="number" min="0" value="0"></label>
+          <label>Contact name <input id="grp-contact"></label>
+        </div>
+        <div class="row-2">
+          <label>Contact phone <input id="grp-phone"></label>
+          <label>Contact email <input id="grp-email" type="email"></label>
+        </div>
+        <label id="grp-coord-wrap" hidden>Assign coordinator username
+          <input id="grp-coord" autocomplete="off" autocapitalize="none">
+        </label>
+        <label>Special requirements <textarea id="grp-reqs"></textarea></label>
+        <button class="btn-teal" type="submit">Save group</button>
+      </form>
+      <div class="list" id="group-list" style="margin-top:14px"></div>
+    </section>
+
+    <section class="panel" data-page="approvals" hidden>
+      <h1>Approvals</h1>
+      <p class="note">Review pending rehearsal requests. Approve, reject, or leave a logistics comment.</p>
+      <div class="list" id="approval-list"></div>
+    </section>
+
+    <section class="panel" data-page="bookings" hidden>
+      <h1>All bookings</h1>
+      <div class="list" id="booking-list"></div>
+    </section>
+
+    <section class="panel" data-page="events" hidden>
+      <h1>Events &amp; sessions</h1>
+      <p class="note">Create year-round cultural events (e.g. Boishakhi 2027) and the three-hour gym rentals under each.</p>
+      <form id="event-form">
+        <div class="row-2">
+          <label>Event name <input id="evt-name" required placeholder="Boishakhi 2027"></label>
+          <label>Max slots / group <input id="evt-max" type="number" min="1" value="4"></label>
+        </div>
+        <label>Description <textarea id="evt-desc"></textarea></label>
+        <button class="btn-teal" type="submit">Create event</button>
+      </form>
+      <form id="session-form" style="margin-top:16px">
+        <h2>Add rental session</h2>
+        <div class="row-2">
+          <label>Event <select id="sess-event" required></select></label>
+          <label>Date <input id="sess-date" type="date" required></label>
+        </div>
+        <div class="row-2">
+          <label>Start <input id="sess-start" type="time" value="18:00" required></label>
+          <label>End <input id="sess-end" type="time" value="21:00" required></label>
+        </div>
+        <label>Notes <input id="sess-notes" placeholder="School-approved evening rental"></label>
+        <button class="btn-orange" type="submit">Add session</button>
+      </form>
+      <div class="list" id="event-list" style="margin-top:14px"></div>
+    </section>
+
+    <section class="panel" data-page="people" hidden>
+      <h1>People &amp; teams</h1>
+      <p class="note">Activate coordinator registrations, create cultural/admin accounts, assign coordinators to groups.</p>
+      <form id="people-form">
+        <div class="row-2">
+          <label>Username <input id="ppl-username" required autocapitalize="none" spellcheck="false"></label>
+          <label>Role
+            <select id="ppl-role">
+              <option value="coordinator">Coordinator</option>
+              <option value="cultural">Cultural</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+        </div>
+        <div class="row-2">
+          <label>Name <input id="ppl-name"></label>
+          <label>Password <input id="ppl-password" type="password" placeholder="Set or leave blank to keep"></label>
+        </div>
+        <div class="row-2">
+          <label>Email <input id="ppl-email" type="email"></label>
+          <label>Status
+            <select id="ppl-status">
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn-teal" type="submit">Save account</button>
+      </form>
+      <div class="list" id="people-list" style="margin-top:14px"></div>
+    </section>
+
+    <section class="panel" data-page="stats" hidden>
+      <h1>Usage statistics</h1>
+      <label>Window
+        <select id="stats-window">
+          <option value="30">Last 1 month</option>
+          <option value="90">Last 3 months</option>
+          <option value="7">Last 7 days</option>
+          <option value="365">Last year</option>
+        </select>
+      </label>
+      <div class="stat-grid" id="stats-grid"></div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Coordinator</th><th>Total</th><th>Approved</th><th>Pending</th><th>Rejected</th></tr></thead>
+          <tbody id="stats-coords"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" data-page="admin" hidden>
+      <h1>Admin tools</h1>
+      <p class="note">Shared file sync (same pattern as ticket tracker), import/export, and danger-zone cleanup.</p>
+      <label>Google Apps Script record URL
+        <input id="record-url" placeholder="https://script.google.com/macros/s/…/exec">
+      </label>
+      <div class="row-2">
+        <button id="save-record-url" class="btn-teal" type="button">Save sync link</button>
+        <button id="pull-record" class="btn-quiet" type="button">Pull from record</button>
+      </div>
+      <div class="row-2" style="margin-top:10px">
+        <button id="push-record" class="btn-orange" type="button">Push to record</button>
+        <button id="export-file" class="btn-quiet" type="button">Download JSON file</button>
+      </div>
+      <label style="margin-top:12px">Import JSON file
+        <input id="import-file" type="file" accept="application/json,.json">
+      </label>
+      <p class="muted" id="sync-status">Using local browser storage until a record link is set.</p>
+      <button id="reset-seed" class="btn-danger" type="button" style="margin-top:12px">Reset to Boishakhi 2027 seed</button>
+    </section>
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script src="store.js"></script>
+<script src="record.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

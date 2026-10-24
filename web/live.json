@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "facility": {
+    "name": "Samantha Smith Elementary Gym",
+    "address": "23305 NE 14th St, Sammamish, WA 98074",
+    "mapsUrl": "https://share.google/C8C33ynszqGr7fR40",
+    "sessionCost": 70,
+    "sessionHours": 3
+  },
+  "settings": {
+    "defaultMaxSlotsPerGroup": 4,
+    "recommendAdultPerKids": 10,
+    "cancelNoticeHours": 72,
+    "requestLeadDays": 14
+  },
+  "accounts": [
+    {
+      "username": "admin",
+      "hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+      "role": "admin",
+      "name": "Site Admin",
+      "email": "",
+      "phone": "",
+      "status": "active",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "username": "cultural",
+      "hash": "7e2215a75ae991148f955d8773ac7819e7c361789d89654f93d11c5be50de550",
+      "role": "cultural",
+      "name": "Cultural Coordination",
+      "email": "",
+      "phone": "",
+      "status": "active",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "boishakhi-2027",
+      "name": "Boishakhi 2027",
+      "description": "Uttoron Boishakhi cultural performances. Rehearsals at Samantha Smith Elementary Gym.",
+      "status": "open",
+      "maxSlotsPerGroup": 4,
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "sess-boishakhi-2027-1",
+      "eventId": "boishakhi-2027",
+      "date": "2027-03-01",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "sess-boishakhi-2027-2",
+      "eventId": "boishakhi-2027",
+      "date": "2027-03-08",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "sess-boishakhi-2027-3",
+      "eventId": "boishakhi-2027",
+      "date": "2027-03-15",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "sess-boishakhi-2027-4",
+      "eventId": "boishakhi-2027",
+      "date": "2027-03-22",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "sess-boishakhi-2027-5",
+      "eventId": "boishakhi-2027",
+      "date": "2027-03-29",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    },
+    {
+      "id": "sess-boishakhi-2027-6",
+      "eventId": "boishakhi-2027",
+      "date": "2027-04-05",
+      "start": "18:00",
+      "end": "21:00",
+      "notes": "Three-hour school rental · setup, rehearsal, cleanup included",
+      "status": "open",
+      "createdAt": "2026-10-24T00:00:00.000Z"
+    }
+  ],
+  "groups": [],
+  "bookings": [],
+  "log": [
+    {
+      "id": "log-seed",
+      "at": "2026-10-24T00:00:00.000Z",
+      "action": "seed",
+      "actor": "system",
+      "detail": "Seeded Boishakhi 2027 and default accounts"
+    }
+  ],
+  "lastWriteId": ""
+}
