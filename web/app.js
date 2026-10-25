@@ -3,7 +3,7 @@ const STORE = String(config.storagePrefix || "cultural-facility").replace(/[^\w-
 const S = CulturalStore;
 
 function storeKey(name) {
-  return `${STORE}-${name}`;
+  return `${STORE}-v2-${name}`;
 }
 
 const SESSION_KEY = storeKey("session");
@@ -20,7 +20,7 @@ const workspace = document.querySelector("#workspace");
 let book = null;
 let session = null;
 let page = "home";
-let selectedSlot = null;
+let draftPrefs = [];
 
 const POLICY_HTML = `
 <p><strong>Policy UTT-CULT-001</strong> · Cultural rehearsal & facility usage · Samantha Smith Elementary Gym.</p>
@@ -29,25 +29,15 @@ const POLICY_HTML = `
 <h3>Facility</h3>
 <ul>
   <li>Anticipated cost about $70 per three-hour session (setup, rehearsal, cleanup, departure).</li>
-  <li>Evening hours; enter only during your authorized window.</li>
-  <li>Uttoron books the gym centrally—groups may not extend or transfer bookings.</li>
+  <li>Evening hours 6–9 PM; preferences in 15-minute steps.</li>
+  <li>Uttoron books the gym centrally when cultural sees enough demand—groups may not extend or transfer bookings.</li>
 </ul>
 <h3>Eligible activities</h3>
-<p>Children’s/youth dance, musical ensembles, Bengali plays, recitation, adult/intergenerational cultural performances. Private commercial classes and unrelated paid instruction are not covered unless approved in writing.</p>
+<p>Children’s/youth dance, musical ensembles, Bengali plays, recitation, adult/intergenerational cultural performances.</p>
 <h3>Group coordinators</h3>
-<p>Each group names an adult coordinator who registers with Uttoron, keeps a roster, supervises, and follows safety rules. Forming a group does not guarantee performance selection.</p>
-<h3>Booking</h3>
-<ul>
-  <li>Request at least 14 days ahead when possible; cancel 72 hours ahead when possible.</li>
-  <li>Multiple groups may share one three-hour rental in separate hour slots.</li>
-  <li>No permanent exclusive priority.</li>
-</ul>
-<h3>Child safety</h3>
-<p>One responsible adult per about ten children (stricter school rules win). Check-in/out to authorized adults only. Report injuries and incidents promptly.</p>
-<h3>Conduct</h3>
-<p>Authorized areas only; protect floors and property; no smoking, alcohol, flames, weapons, or restricted-area access. Water only in gym unless school permits food.</p>
-<h3>Acknowledgment</h3>
-<p>“I understand that the rehearsal facility is a shared community resource arranged by Uttoron. I agree to follow the approved schedule, provide appropriate supervision, respect school property, comply with Uttoron’s safety and conduct policies, and communicate these requirements to participating families.”</p>
+<p>Register with email/username. Cultural must approve your account before you can create a team or submit preferences. Each team includes a comment naming the event/program.</p>
+<h3>Child safety &amp; conduct</h3>
+<p>Adult supervision, authorized areas only, protect school property. Report incidents promptly.</p>
 `;
 
 function show(el) {
@@ -62,7 +52,7 @@ function flash(message, bad) {
   el.hidden = !message;
   el.textContent = message || "";
   el.className = bad ? "result bad" : "result ok";
-  if (message) setTimeout(() => { if (el.textContent === message) el.hidden = true; }, 4500);
+  if (message) setTimeout(() => { if (el.textContent === message) el.hidden = true; }, 5000);
 }
 
 async function sha256(value) {
@@ -98,7 +88,7 @@ function persistBookLocal() {
 function loadBookLocal() {
   try {
     const raw = JSON.parse(localStorage.getItem(BOOK_KEY) || "null");
-    if (raw && raw.schemaVersion === 1) return S.normalizeBook(raw);
+    if (raw && (raw.schemaVersion === 1 || raw.schemaVersion === 2)) return S.normalizeBook(raw);
   } catch { /* ignore */ }
   return null;
 }
@@ -164,15 +154,24 @@ function can(roleNeeded) {
   return false;
 }
 
+function myGroups() {
+  const account = currentAccount();
+  let groups = book.groups || [];
+  if (account.role === "coordinator") {
+    groups = groups.filter((g) => g.coordinatorUsername === account.username && g.status === "active");
+  }
+  return groups;
+}
+
 function tabsForRole(role) {
   const base = [
     ["home", "Home"],
+    ["groups", "My team"],
     ["calendar", "Calendar"],
-    ["groups", "Groups"],
-    ["bookings", "My bookings"],
+    ["bookings", "My prefs"],
   ];
   if (role === "cultural" || role === "admin") {
-    base.splice(3, 0, ["approvals", "Approvals"]);
+    base.splice(3, 0, ["approvals", "Demand"]);
     base.push(["events", "Events"]);
     base.push(["people", "People"]);
     base.push(["stats", "Stats"]);
@@ -216,13 +215,8 @@ function fillEventSelects() {
 }
 
 function groupsForSelect() {
-  const account = currentAccount();
   const eventId = document.querySelector("#cal-event").value;
-  let groups = (book.groups || []).filter((g) => g.status === "active" && (!eventId || g.eventId === eventId));
-  if (account.role === "coordinator") {
-    groups = groups.filter((g) => g.coordinatorUsername === account.username);
-  }
-  return groups;
+  return myGroups().filter((g) => !eventId || g.eventId === eventId);
 }
 
 function fillGroupSelect() {
@@ -231,7 +225,7 @@ function fillGroupSelect() {
   const previous = el.value;
   el.innerHTML = groups.length
     ? groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("")
-    : `<option value="">No groups yet — create one under Groups</option>`;
+    : `<option value="">Create a team first (My team)</option>`;
   if (previous && groups.some((g) => g.id === previous)) el.value = previous;
   const group = S.findGroup(book, el.value);
   if (group) {
@@ -257,122 +251,194 @@ function formatDate(date) {
   }
 }
 
-function bookingLabel(booking) {
-  const group = S.findGroup(book, booking.groupId);
-  const session = S.findSession(book, booking.sessionId);
-  const event = S.findEvent(book, booking.eventId);
-  return {
-    title: group ? group.name : booking.groupId,
-    when: session ? `${formatDate(session.date)} · ${booking.slotStart}–${booking.slotEnd}` : `${booking.slotStart}–${booking.slotEnd}`,
-    event: event ? event.name : booking.eventId,
-  };
+function formatDuration(mins) {
+  if (mins % 60 === 0) return `${mins / 60}h`;
+  if (mins > 60) return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+  return `${mins} min`;
+}
+
+function bookingWhen(b) {
+  return `${formatDate(b.date)} · ${b.start}–${b.end} (${formatDuration(b.durationMinutes || 0)})`;
 }
 
 function renderHome() {
   const account = currentAccount();
   document.querySelector("#who").textContent = `${account.name || account.username}`;
   document.querySelector("#who-role").textContent = S.ROLES.find((r) => r[0] === account.role)?.[1] || account.role;
+  const teams = myGroups().length;
   document.querySelector("#home-blurb").textContent =
     account.role === "coordinator"
-      ? "Create your performance group, request rehearsal hours, and watch approval status."
-      : account.role === "cultural"
-        ? "Approve coordinator bookings, comment on logistics needs, and keep the shared gym calendar fair."
-        : "Full control: events, sessions, people, approvals, sync file, and usage stats.";
+      ? teams
+        ? "Submit preferred evenings on Calendar. When cultural books the gym and approves you, those dates light up green."
+        : "First create your team under My team (include a comment for the event/program). Then open Calendar to pick preferred dates."
+      : "Review demand by evening. When enough preferences arrive, book the 6–9 PM facility rental and approve teams so their calendars light up.";
 
-  const mine = (book.bookings || []).filter((b) => {
-    if (account.role === "coordinator") {
+  const pendingPeople = (book.accounts || []).filter((a) => a.status === "pending").length;
+  const pendingPrefs = (book.bookings || []).filter((b) => b.status === "pending").length;
+  const approved = (book.bookings || []).filter((b) => {
+    if (b.status !== "approved") return false;
+    if (account.role !== "coordinator") return true;
+    const g = S.findGroup(book, b.groupId);
+    return g && g.coordinatorUsername === account.username;
+  }).length;
+  document.querySelector("#home-stats").innerHTML = `
+    <div class="stat"><span class="muted">Pending logins</span><strong>${pendingPeople}</strong></div>
+    <div class="stat"><span class="muted">Pending prefs</span><strong>${pendingPrefs}</strong></div>
+    <div class="stat"><span class="muted">Approved (lit)</span><strong>${approved}</strong></div>
+    <div class="stat"><span class="muted">Your teams</span><strong>${teams}</strong></div>
+  `;
+
+  let rows = book.bookings || [];
+  if (account.role === "coordinator") {
+    rows = rows.filter((b) => {
       const g = S.findGroup(book, b.groupId);
       return g && g.coordinatorUsername === account.username;
-    }
-    return b.status === "pending";
-  });
-  const pending = (book.bookings || []).filter((b) => b.status === "pending").length;
-  const approved = (book.bookings || []).filter((b) => b.status === "approved").length;
-  const groups = (book.groups || []).filter((g) => account.role !== "coordinator" || g.coordinatorUsername === account.username).length;
-  document.querySelector("#home-stats").innerHTML = `
-    <div class="stat"><span class="muted">Pending</span><strong>${pending}</strong></div>
-    <div class="stat"><span class="muted">Approved</span><strong>${approved}</strong></div>
-    <div class="stat"><span class="muted">Groups</span><strong>${groups}</strong></div>
-    <div class="stat"><span class="muted">Events</span><strong>${(book.events || []).length}</strong></div>
-  `;
-  const list = document.querySelector("#home-pending");
-  const rows = mine.slice(0, 8);
-  list.innerHTML = rows.length
+    });
+  } else {
+    rows = rows.filter((b) => b.status === "pending");
+  }
+  rows = rows.slice(0, 8);
+  document.querySelector("#home-pending").innerHTML = rows.length
     ? rows.map((b) => {
-      const info = bookingLabel(b);
-      return `<div class="card"><h3>${escapeHtml(info.title)} <span class="badge ${b.status}">${b.status}</span></h3><p class="meta">${escapeHtml(info.event)} · ${escapeHtml(info.when)} · ${b.kidsCount} participants</p></div>`;
+      const g = S.findGroup(book, b.groupId);
+      return `<div class="card"><h3>${escapeHtml(g ? g.name : b.groupId)} <span class="badge ${b.status}">${b.status}</span></h3><p class="meta">${escapeHtml(bookingWhen(b))}</p></div>`;
     }).join("")
-    : `<p class="muted">No recent bookings to show.</p>`;
+    : `<p class="muted">Nothing waiting right now.</p>`;
+}
+
+function renderApprovedCalendar() {
+  const host = document.querySelector("#cal-approved");
+  const account = currentAccount();
+  const mine = (book.bookings || []).filter((b) => {
+    const g = S.findGroup(book, b.groupId);
+    if (!g) return false;
+    if (account.role === "coordinator" && g.coordinatorUsername !== account.username) return false;
+    return b.status === "approved" || b.status === "pending";
+  });
+  if (!mine.length) {
+    host.innerHTML = `<p class="muted">Approved evenings will light up here after cultural confirms your preferences.</p>`;
+    return;
+  }
+  const byDate = {};
+  mine.forEach((b) => {
+    if (!byDate[b.date]) byDate[b.date] = [];
+    byDate[b.date].push(b);
+  });
+  host.innerHTML = Object.keys(byDate).sort().map((date) => {
+    const items = byDate[date];
+    const lit = items.some((b) => b.status === "approved");
+    const pending = items.some((b) => b.status === "pending");
+    const cls = lit ? "cal-day lit" : pending ? "cal-day pending-day" : "cal-day";
+    const times = items.map((b) => `${b.start}–${b.end} (${b.status})`).join(" · ");
+    return `<div class="${cls}"><p class="day-label">${escapeHtml(formatDate(date))}</p><p class="day-times">${escapeHtml(times)}</p></div>`;
+  }).join("");
+}
+
+function renderDraftList() {
+  const host = document.querySelector("#draft-list");
+  if (!draftPrefs.length) {
+    host.className = "muted";
+    host.textContent = "None yet — pick start time and length on evenings below, then Add.";
+    return;
+  }
+  host.className = "list";
+  host.innerHTML = draftPrefs.map((d, index) => `
+    <div class="card">
+      <h3>${escapeHtml(formatDate(d.date))} · ${d.start}–${d.end}</h3>
+      <p class="meta">${formatDuration(d.durationMinutes)}</p>
+      <div class="actions"><button type="button" class="btn-quiet" data-drop-draft="${index}">Remove</button></div>
+    </div>`).join("");
+  host.querySelectorAll("[data-drop-draft]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      draftPrefs.splice(Number(btn.dataset.dropDraft), 1);
+      renderDraftList();
+    });
+  });
 }
 
 function renderCalendar() {
   fillEventSelects();
   fillGroupSelect();
+  renderApprovedCalendar();
+  renderDraftList();
+
   const eventId = document.querySelector("#cal-event").value;
-  const sessions = (book.sessions || [])
-    .filter((s) => s.eventId === eventId && s.status === "open")
-    .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
-  const event = S.findEvent(book, eventId);
-  const max = event ? event.maxSlotsPerGroup : 4;
   const groupId = document.querySelector("#cal-group").value;
+  const sessions = (book.sessions || [])
+    .filter((s) => s.eventId === eventId && (s.status === "open" || s.status === "booked"))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const event = S.findEvent(book, eventId);
+  const max = event ? event.maxSlotsPerGroup : 6;
   const used = groupId ? S.activeBookingsForGroup(book, groupId).length : 0;
   const host = document.querySelector("#cal-sessions");
-  if (!sessions.length) {
-    host.innerHTML = `<p class="muted">No open sessions for this event yet. Admin/cultural can add rental evenings under Events.</p>`;
+
+  if (!myGroups().length) {
+    host.innerHTML = `<p class="muted">Create your team under <strong>My team</strong> first (with a program comment). Then return here to pick preferred dates.</p>`;
     return;
   }
-  host.innerHTML = `<p class="note">Active slots for this group: ${used} / ${max}</p>` + sessions.map((session) => {
-    const slots = S.hourSlots(session.start, session.end);
-    const buttons = slots.map((slot) => {
-      const taken = S.slotTaken(book, session.id, slot.start);
-      const mine = (book.bookings || []).find(
-        (b) => b.sessionId === session.id && b.slotStart === slot.start && (b.status === "pending" || b.status === "approved")
-      );
-      const selected = selectedSlot && selectedSlot.sessionId === session.id && selectedSlot.slotStart === slot.start;
-      const who = mine ? S.findGroup(book, mine.groupId) : null;
-      const label = taken
-        ? `${slot.start}–${slot.end} · ${mine.status}${who ? ` · ${who.name}` : ""}`
-        : `${slot.start}–${slot.end} · available`;
-      return `<button type="button" class="slot-btn${taken ? " taken" : ""}${mine && mine.groupId === groupId ? " mine" : ""}${selected ? " selected" : ""}" data-session="${session.id}" data-start="${slot.start}" ${taken ? "disabled" : ""}>${escapeHtml(label)}</button>`;
-    }).join("");
-    return `<div class="card"><h3>${escapeHtml(formatDate(session.date))}</h3><p class="meta">${session.start}–${session.end} rental${session.notes ? ` · ${escapeHtml(session.notes)}` : ""}</p><div class="slot-grid">${buttons}</div><div class="actions"><button type="button" class="btn-orange book-slot" data-session="${session.id}">Request selected hour</button></div></div>`;
+  if (!sessions.length) {
+    host.innerHTML = `<p class="muted">No preference evenings yet for this event. Cultural/admin adds 6–9 PM dates under Events.</p>`;
+    return;
+  }
+
+  host.innerHTML = `<p class="note">Active preferences for this team: ${used} / ${max}. Times are 15‑minute steps inside 6–9 PM.</p>` + sessions.map((sess) => {
+    const starts = S.startOptions(sess, 60);
+    const startOpts = starts.map((t) => `<option value="${t}">${t}</option>`).join("");
+    const bookedBadge = sess.facilityBooked || sess.status === "booked"
+      ? `<span class="badge approved">facility booked</span>`
+      : `<span class="badge open">collecting prefs</span>`;
+    return `<div class="card" data-session-card="${sess.id}">
+      <h3>${escapeHtml(formatDate(sess.date))} ${bookedBadge}</h3>
+      <p class="meta">${sess.start}–${sess.end}${sess.notes ? ` · ${escapeHtml(sess.notes)}` : ""}</p>
+      <div class="pref-row">
+        <label>Preferred start
+          <select data-start="${sess.id}">${startOpts}</select>
+        </label>
+        <label>How long
+          <select data-dur="${sess.id}"></select>
+        </label>
+        <button type="button" class="btn-teal" data-add-pref="${sess.id}">Add</button>
+      </div>
+    </div>`;
   }).join("");
 
-  host.querySelectorAll(".slot-btn:not([disabled])").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedSlot = { sessionId: btn.dataset.session, slotStart: btn.dataset.start };
-      renderCalendar();
-    });
+  host.querySelectorAll("[data-start]").forEach((sel) => {
+    const sid = sel.dataset.start;
+    const sess = S.findSession(book, sid);
+    const durSel = host.querySelector(`[data-dur="${sid}"]`);
+    function refillDur() {
+      const options = S.durationOptions(sess, sel.value);
+      durSel.innerHTML = options.map((d) => `<option value="${d}" ${d === 60 ? "selected" : ""}>${formatDuration(d)}</option>`).join("");
+    }
+    refillDur();
+    sel.addEventListener("change", refillDur);
   });
-  host.querySelectorAll(".book-slot").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      if (!selectedSlot || selectedSlot.sessionId !== btn.dataset.session) {
-        flash("Select an available hour in this session first.", true);
+
+  host.querySelectorAll("[data-add-pref]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!groupId) {
+        flash("Select your team first.", true);
         return;
       }
-      const groupIdNow = document.querySelector("#cal-group").value;
-      if (!groupIdNow) {
-        flash("Create or select a group first.", true);
+      const sid = btn.dataset.addPref;
+      const sess = S.findSession(book, sid);
+      const start = host.querySelector(`[data-start="${sid}"]`).value;
+      const durationMinutes = Number(host.querySelector(`[data-dur="${sid}"]`).value);
+      const end = S.fromMinutes(S.toMinutes(start) + durationMinutes);
+      if (draftPrefs.some((d) => d.sessionId === sid && d.start === start && d.durationMinutes === durationMinutes)) {
+        flash("That preference is already in your list.", true);
         return;
       }
-      const result = await mutateBook((b) => S.createBooking(b, {
-        groupId: groupIdNow,
-        sessionId: selectedSlot.sessionId,
-        slotStart: selectedSlot.slotStart,
-        kidsCount: document.querySelector("#cal-kids").value,
-        pointOfContact: document.querySelector("#cal-poc").value,
-        specialRequirements: document.querySelector("#cal-reqs").value,
-      }, session.username));
-      flash(result.message, !result.ok);
-      selectedSlot = null;
-      renderPage();
+      draftPrefs.push({ sessionId: sid, date: sess.date, start, end, durationMinutes });
+      renderDraftList();
+      flash(`Added ${formatDate(sess.date)} ${start}–${end}`);
     });
   });
 }
 
 function renderGroups() {
   fillEventSelects();
-  document.querySelector("#grp-coord-wrap").hidden = !(can("cultural"));
+  document.querySelector("#grp-coord-wrap").hidden = !can("cultural");
   const account = currentAccount();
   let groups = book.groups || [];
   if (account.role === "coordinator") groups = groups.filter((g) => g.coordinatorUsername === account.username);
@@ -382,16 +448,17 @@ function renderGroups() {
     const active = S.activeBookingsForGroup(book, g.id).length;
     return `<div class="card">
       <h3>${escapeHtml(g.name)} <span class="badge ${g.status}">${g.status}</span></h3>
-      <p class="meta">${escapeHtml(event ? event.name : g.eventId)} · ${escapeHtml(g.type)} · coord ${escapeHtml(g.coordinatorUsername || "—")} · ${g.participantEstimate || 0} est. · ${active} active slots</p>
-      <p class="meta">${escapeHtml(g.specialRequirements || "No special requirements noted.")}</p>
+      <p class="meta">${escapeHtml(event ? event.name : g.eventId)} · ${escapeHtml(g.type)} · ${active} active prefs</p>
+      <p class="meta"><strong>Program comment:</strong> ${escapeHtml(g.programComment || "—")}</p>
       <div class="actions">
-        ${can("admin") || (account.role === "coordinator" && g.coordinatorUsername === account.username) ? `<button type="button" class="btn-danger" data-del-group="${g.id}">Delete</button>` : ""}
+        ${can("admin") || (account.role === "coordinator" && g.coordinatorUsername === account.username)
+          ? `<button type="button" class="btn-danger" data-del-group="${g.id}">Delete</button>` : ""}
       </div>
     </div>`;
-  }).join("") : `<p class="muted">No groups yet.</p>`;
+  }).join("") : `<p class="muted">No team yet. Create one above so you can submit date preferences.</p>`;
   host.querySelectorAll("[data-del-group]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete this group?")) return;
+      if (!confirm("Delete this team?")) return;
       const result = await mutateBook((b) => S.deleteGroup(b, btn.dataset.delGroup, session.username));
       flash(result.message, !result.ok);
       renderPage();
@@ -400,9 +467,44 @@ function renderGroups() {
 }
 
 function renderApprovals() {
+  const demandHost = document.querySelector("#demand-list");
+  const eventId = (book.events || []).find((e) => e.status === "open")?.id;
+  const demand = S.demandByDate(book, null);
+  const sessions = book.sessions || [];
+
+  if (!demand.length && !sessions.length) {
+    demandHost.innerHTML = `<p class="muted">No preferences yet.</p>`;
+  } else {
+    const dates = new Set([
+      ...demand.map((d) => d.date),
+      ...sessions.map((s) => s.date),
+    ]);
+    demandHost.innerHTML = [...dates].sort().map((date) => {
+      const row = demand.find((d) => d.date === date) || { pending: 0, approved: 0, total: 0 };
+      const sess = sessions.find((s) => s.date === date);
+      const booked = sess && (sess.facilityBooked || sess.status === "booked");
+      return `<div class="card">
+        <h3>${escapeHtml(formatDate(date))}</h3>
+        <p class="meta">${sess ? `${sess.start}–${sess.end}` : "no evening configured"} · pending <span class="demand-count">${row.pending || 0}</span> · approved ${row.approved || 0}</p>
+        <div class="actions">
+          ${sess && !booked ? `<button type="button" class="btn-orange" data-book-facility="${sess.id}">Book facility (6–9 PM)</button>` : ""}
+          ${booked ? `<span class="badge approved">facility booked</span>` : ""}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  demandHost.querySelectorAll("[data-book-facility]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const result = await mutateBook((b) => S.bookFacilitySession(b, btn.dataset.bookFacility, session.username, "School rental confirmed by cultural team"));
+      flash(result.message, !result.ok);
+      renderPage();
+    });
+  });
+
   const pending = (book.bookings || []).filter((b) => b.status === "pending");
   const host = document.querySelector("#approval-list");
-  host.innerHTML = pending.length ? pending.map((b) => bookingCard(b, true)).join("") : `<p class="muted">No pending requests.</p>`;
+  host.innerHTML = pending.length ? pending.map((b) => bookingCard(b, true)).join("") : `<p class="muted">No pending preferences.</p>`;
   wireBookingActions(host);
 }
 
@@ -417,26 +519,28 @@ function renderBookings() {
   }
   list = list.slice().sort((a, b) => String(b.requestedAt).localeCompare(String(a.requestedAt)));
   const host = document.querySelector("#booking-list");
-  host.innerHTML = list.length ? list.map((b) => bookingCard(b, can("cultural"))).join("") : `<p class="muted">No bookings yet.</p>`;
+  host.innerHTML = list.length ? list.map((b) => bookingCard(b, can("cultural"))).join("") : `<p class="muted">No preferences yet.</p>`;
   wireBookingActions(host);
 }
 
 function bookingCard(b, manage) {
-  const info = bookingLabel(b);
-  const comments = (b.comments || []).map((c) => `<li><strong>${escapeHtml(c.by)}</strong> · ${escapeHtml(c.text)}<br><span class="muted">${escapeHtml(c.at)}</span></li>`).join("");
+  const g = S.findGroup(book, b.groupId);
+  const event = S.findEvent(book, b.eventId);
+  const comments = (b.comments || []).map((c) => `<li><strong>${escapeHtml(c.by)}</strong> · ${escapeHtml(c.text)}</li>`).join("");
   return `<div class="card" data-booking="${b.id}">
-    <h3>${escapeHtml(info.title)} <span class="badge ${b.status}">${b.status}</span></h3>
-    <p class="meta">${escapeHtml(info.event)} · ${escapeHtml(info.when)}</p>
-    <p class="meta">${b.kidsCount} participants · POC ${escapeHtml(b.pointOfContact || "—")} · by ${escapeHtml(b.requestedBy)}</p>
+    <h3>${escapeHtml(g ? g.name : b.groupId)} <span class="badge ${b.status}">${b.status}</span></h3>
+    <p class="meta">${escapeHtml(event ? event.name : "")} · ${escapeHtml(bookingWhen(b))}</p>
+    <p class="meta">${b.kidsCount} participants · POC ${escapeHtml(b.pointOfContact || "—")}</p>
+    <p class="meta">${escapeHtml((g && g.programComment) || "")}</p>
     <p class="meta">${escapeHtml(b.specialRequirements || "No special requirements.")}</p>
     ${comments ? `<ul class="comments">${comments}</ul>` : ""}
-    ${manage ? `<label>Comment / logistics note<textarea data-comment="${b.id}"></textarea></label>
+    ${manage ? `<label>Comment<textarea data-comment="${b.id}"></textarea></label>
       <div class="actions">
-        ${b.status === "pending" ? `<button type="button" class="btn-teal" data-approve="${b.id}">Approve</button><button type="button" class="btn-danger" data-reject="${b.id}">Reject</button>` : ""}
+        ${b.status === "pending" ? `<button type="button" class="btn-teal" data-approve="${b.id}">Approve (light up)</button><button type="button" class="btn-danger" data-reject="${b.id}">Reject</button>` : ""}
         <button type="button" class="btn-quiet" data-add-comment="${b.id}">Add comment</button>
         ${can("admin") ? `<button type="button" class="btn-danger" data-delete-booking="${b.id}">Delete</button>` : ""}
         ${b.status === "pending" || b.status === "approved" ? `<button type="button" class="btn-quiet" data-cancel="${b.id}">Cancel</button>` : ""}
-      </div>` : `${b.status === "pending" || b.status === "approved" ? `<div class="actions"><button type="button" class="btn-quiet" data-cancel="${b.id}">Cancel my request</button></div>` : ""}`}
+      </div>` : `${b.status === "pending" || b.status === "approved" ? `<div class="actions"><button type="button" class="btn-quiet" data-cancel="${b.id}">Cancel my preference</button></div>` : ""}`}
   </div>`;
 }
 
@@ -474,7 +578,7 @@ function wireBookingActions(host) {
   });
   host.querySelectorAll("[data-delete-booking]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Permanently delete this booking?")) return;
+      if (!confirm("Delete this preference?")) return;
       const result = await mutateBook((b) => S.deleteBooking(b, btn.dataset.deleteBooking, session.username));
       flash(result.message, !result.ok);
       renderPage();
@@ -489,13 +593,15 @@ function renderEvents() {
     const sessions = (book.sessions || []).filter((s) => s.eventId === event.id);
     const sessionHtml = sessions.map((s) => `
       <div class="card" style="margin-top:8px">
-        <h3>${escapeHtml(formatDate(s.date))} · ${s.start}–${s.end}</h3>
+        <h3>${escapeHtml(formatDate(s.date))} · ${s.start}–${s.end}
+          ${s.facilityBooked || s.status === "booked" ? `<span class="badge approved">booked</span>` : `<span class="badge open">prefs</span>`}
+        </h3>
         <p class="meta">${escapeHtml(s.notes || "")}</p>
-        <div class="actions"><button type="button" class="btn-danger" data-del-session="${s.id}">Remove session</button></div>
-      </div>`).join("") || `<p class="muted">No sessions yet.</p>`;
+        <div class="actions"><button type="button" class="btn-danger" data-del-session="${s.id}">Remove evening</button></div>
+      </div>`).join("") || `<p class="muted">No evenings yet.</p>`;
     return `<div class="card">
       <h3>${escapeHtml(event.name)} <span class="badge ${event.status}">${event.status}</span></h3>
-      <p class="meta">Max ${event.maxSlotsPerGroup} slots/group · ${escapeHtml(event.description || "")}</p>
+      <p class="meta">Max ${event.maxSlotsPerGroup} prefs/team · ${escapeHtml(event.description || "")}</p>
       <div class="actions">
         <button type="button" class="btn-quiet" data-toggle-event="${event.id}">${event.status === "open" ? "Close event" : "Reopen event"}</button>
       </div>
@@ -512,7 +618,7 @@ function renderEvents() {
   });
   host.querySelectorAll("[data-del-session]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Remove this rental session?")) return;
+      if (!confirm("Remove this evening?")) return;
       const result = await mutateBook((b) => S.deleteSession(b, btn.dataset.delSession, session.username));
       flash(result.message, !result.ok);
       renderPage();
@@ -522,13 +628,17 @@ function renderEvents() {
 
 function renderPeople() {
   const host = document.querySelector("#people-list");
-  const accounts = (book.accounts || []).slice().sort((a, b) => a.username.localeCompare(b.username));
+  const accounts = (book.accounts || []).slice().sort((a, b) => {
+    if (a.status === "pending" && b.status !== "pending") return -1;
+    if (b.status === "pending" && a.status !== "pending") return 1;
+    return a.username.localeCompare(b.username);
+  });
   host.innerHTML = accounts.map((a) => `
     <div class="card">
       <h3>${escapeHtml(a.username)} <span class="badge ${a.status}">${a.status}</span> · ${escapeHtml(a.role)}</h3>
       <p class="meta">${escapeHtml(a.name || "")} · ${escapeHtml(a.email || "no email")} · ${escapeHtml(a.phone || "")}</p>
       <div class="actions">
-        ${a.status !== "active" ? `<button type="button" class="btn-teal" data-activate="${a.username}">Activate</button>` : ""}
+        ${a.status !== "active" ? `<button type="button" class="btn-teal" data-activate="${a.username}">Approve login</button>` : ""}
         ${a.status === "active" ? `<button type="button" class="btn-quiet" data-disable="${a.username}">Disable</button>` : ""}
         ${can("admin") && a.username !== "admin" ? `<button type="button" class="btn-danger" data-delete-user="${a.username}">Delete</button>` : ""}
       </div>
@@ -561,12 +671,12 @@ function renderStats() {
   const days = Number(document.querySelector("#stats-window").value || 30);
   const data = S.stats(book, days);
   document.querySelector("#stats-grid").innerHTML = `
-    <div class="stat"><span class="muted">Sessions in window</span><strong>${data.sessionsBooked}</strong></div>
-    <div class="stat"><span class="muted">Hour slots available</span><strong>${data.availableSlots}</strong></div>
-    <div class="stat"><span class="muted">Approved usage</span><strong>${data.usedSlots}</strong></div>
-    <div class="stat"><span class="muted">Unused capacity</span><strong>${data.unusedSlots}</strong></div>
+    <div class="stat"><span class="muted">Evenings offered</span><strong>${data.sessionsBooked}</strong></div>
+    <div class="stat"><span class="muted">Facility booked</span><strong>${data.facilityBooked}</strong></div>
+    <div class="stat"><span class="muted">Prefs approved</span><strong>${data.usedSlots}</strong></div>
+    <div class="stat"><span class="muted">Unused evenings</span><strong>${data.unusedSlots}</strong></div>
     <div class="stat"><span class="muted">Utilization</span><strong>${data.utilization}%</strong></div>
-    <div class="stat"><span class="muted">Requests</span><strong>${data.bookingCount}</strong></div>
+    <div class="stat"><span class="muted">All requests</span><strong>${data.bookingCount}</strong></div>
   `;
   const body = document.querySelector("#stats-coords");
   const entries = Object.entries(data.byCoordinator).sort((a, b) => b[1].total - a[1].total);
@@ -578,8 +688,8 @@ function renderStats() {
 function renderAdmin() {
   document.querySelector("#record-url").value = recordUrlValue();
   document.querySelector("#sync-status").textContent = recordUrlValue()
-    ? "Record link saved. Pull/Push syncs the shared Google file (ticket-tracker style)."
-    : "Using local browser storage. Download/upload JSON to move data between devices, or paste a Google Apps Script /exec URL.";
+    ? "Record link saved. Pull/Push syncs the shared Google file."
+    : "Using local browser storage. Download/upload JSON, or paste a Google Apps Script /exec URL.";
 }
 
 function renderPage() {
@@ -601,7 +711,7 @@ async function enterWorkspace() {
   if (!account || account.status !== "active") {
     saveSession(null);
     show(gate);
-    flash("Account is not active yet.", true);
+    flash("Account is not active yet. Wait for cultural approval.", true);
     return;
   }
   show(workspace);
@@ -620,6 +730,7 @@ document.querySelector("#register-back").addEventListener("click", () => show(ga
 document.querySelector("#login-back").addEventListener("click", () => show(gate));
 document.querySelector("#logout").addEventListener("click", () => {
   saveSession(null);
+  draftPrefs = [];
   show(gate);
 });
 
@@ -628,11 +739,14 @@ document.querySelector("#register-form").addEventListener("submit", async (event
   const err = document.querySelector("#register-error");
   err.hidden = true;
   await ensureBook();
+  const email = document.querySelector("#reg-email").value.trim();
+  let username = document.querySelector("#reg-username").value.trim();
+  if (!username && email) username = email;
   const hash = await sha256(document.querySelector("#reg-password").value);
   const result = await mutateBook((b) => S.registerAccount(b, {
-    username: document.querySelector("#reg-username").value,
+    username,
     name: document.querySelector("#reg-name").value,
-    email: document.querySelector("#reg-email").value,
+    email,
     phone: document.querySelector("#reg-phone").value,
     hash,
     policyAck: document.querySelector("#reg-policy").checked,
@@ -656,13 +770,13 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   const account = S.findAccount(book, username);
   const digest = await sha256(password);
   if (!account || account.hash !== digest) {
-    err.textContent = "Username or password is wrong.";
+    err.textContent = "Login or password is wrong.";
     err.hidden = false;
     return;
   }
   if (account.status !== "active") {
     err.textContent = account.status === "pending"
-      ? "Registration is pending cultural team activation."
+      ? "Cultural team has not approved your account yet. You cannot book until then."
       : "This account is disabled.";
     err.hidden = false;
     return;
@@ -680,6 +794,7 @@ document.querySelector("#group-form").addEventListener("submit", async (event) =
   const result = await mutateBook((b) => S.createGroup(b, {
     eventId: document.querySelector("#grp-event").value,
     name: document.querySelector("#grp-name").value,
+    programComment: document.querySelector("#grp-program").value,
     type: document.querySelector("#grp-type").value,
     ageGroups: document.querySelector("#grp-ages").value,
     participantEstimate: document.querySelector("#grp-count").value,
@@ -690,8 +805,41 @@ document.querySelector("#group-form").addEventListener("submit", async (event) =
     coordinatorUsername: coord,
   }, account.username));
   flash(result.message, !result.ok);
-  if (result.ok) event.target.reset();
+  if (result.ok) {
+    event.target.reset();
+    showPage("calendar");
+    return;
+  }
   renderPage();
+});
+
+document.querySelector("#submit-prefs").addEventListener("click", async () => {
+  const groupId = document.querySelector("#cal-group").value;
+  if (!groupId) {
+    flash("Select your team first.", true);
+    return;
+  }
+  if (!draftPrefs.length) {
+    flash("Add at least one preferred evening first.", true);
+    return;
+  }
+  const result = await mutateBook((b) => S.createPreferences(b, {
+    groupId,
+    kidsCount: document.querySelector("#cal-kids").value,
+    pointOfContact: document.querySelector("#cal-poc").value,
+    specialRequirements: document.querySelector("#cal-reqs").value,
+    preferences: draftPrefs,
+  }, session.username));
+  flash(result.message, !result.ok);
+  if (result.ok) {
+    draftPrefs = [];
+    renderPage();
+  }
+});
+
+document.querySelector("#clear-drafts").addEventListener("click", () => {
+  draftPrefs = [];
+  renderDraftList();
 });
 
 document.querySelector("#event-form").addEventListener("submit", async (event) => {
@@ -743,15 +891,11 @@ document.querySelector("#people-form").addEventListener("submit", async (event) 
 });
 
 document.querySelector("#cal-event").addEventListener("change", () => {
-  selectedSlot = null;
+  draftPrefs = [];
   fillGroupSelect();
   renderCalendar();
 });
-document.querySelector("#cal-group").addEventListener("change", () => {
-  selectedSlot = null;
-  fillGroupSelect();
-  renderCalendar();
-});
+document.querySelector("#cal-group").addEventListener("change", () => renderCalendar());
 document.querySelector("#stats-window").addEventListener("change", renderStats);
 
 document.querySelector("#save-record-url").addEventListener("click", () => {
@@ -777,7 +921,7 @@ document.querySelector("#pull-record").addEventListener("click", async () => {
     persistBookLocal();
     flash("Pulled shared record.");
     renderPage();
-  } catch (error) {
+  } catch {
     flash("Could not pull record.", true);
   }
 });
@@ -792,7 +936,7 @@ document.querySelector("#push-record").addEventListener("click", async () => {
   book.lastWriteId = `${Date.now()}`;
   try {
     await CulturalRecord.postWithForm(url, book);
-    flash("Pushed local book to shared record (no-cors; verify in Drive).");
+    flash("Pushed local book to shared record.");
   } catch {
     flash("Push failed.", true);
   }
@@ -827,6 +971,7 @@ document.querySelector("#reset-seed").addEventListener("click", async () => {
   if (!confirm("Replace all local data with the Boishakhi 2027 seed?")) return;
   book = S.seedBook();
   persistBookLocal();
+  draftPrefs = [];
   flash("Reset to seed data.");
   renderPage();
 });

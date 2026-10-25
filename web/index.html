@@ -19,8 +19,8 @@
 
   <main id="gate" class="gate">
     <div class="gate-card">
-      <h1>Rehearsal booking</h1>
-      <p class="note">Parents and group coordinators register once, then book evening gym slots for Uttoron cultural programs. Cultural team approves requests. Admin manages events, teams, and usage.</p>
+      <h1>Rehearsal preferences</h1>
+      <p class="note">Coordinators register with email/username. Cultural must approve the account before login works for booking. Then create your team (with a program comment), submit preferred evenings (15‑minute steps, 6–9 PM). Cultural books the gym when demand is enough — approved dates light up on your calendar.</p>
       <p class="note">
         <a class="facility-link" id="facility-maps" href="https://share.google/C8C33ynszqGr7fR40" target="_blank" rel="noopener">23305 NE 14th St, Sammamish, WA 98074</a>
         · about $70 / 3-hour session
@@ -43,15 +43,15 @@
   <main id="register-screen" class="screen" hidden>
     <form id="register-form" class="panel">
       <h1>Coordinator registration</h1>
-      <p class="note">After you register, cultural team activates your login. Then you can create a performance group and request rehearsal slots.</p>
+      <p class="note">Create a login (email as username works best). You cannot use the calendar until cultural team approves your account.</p>
       <p id="register-error" class="result bad" hidden></p>
       <label>Full name <input id="reg-name" required autocomplete="name"></label>
       <div class="row-2">
-        <label>Email <input id="reg-email" type="email" autocomplete="email"></label>
+        <label>Email <input id="reg-email" type="email" autocomplete="email" required></label>
         <label>Phone <input id="reg-phone" type="tel" autocomplete="tel"></label>
       </div>
       <div class="row-2">
-        <label>Username <input id="reg-username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+        <label>Login (email or username) <input id="reg-username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="you@email.com"></label>
         <label>Password <input id="reg-password" type="password" required autocomplete="new-password"></label>
       </div>
       <label class="check-row">
@@ -94,13 +94,14 @@
     </section>
 
     <section class="panel" data-page="calendar" hidden>
-      <h1>Calendar &amp; booking</h1>
-      <p class="note">Pick an event, choose your group, then request an open hour inside a three-hour school rental. Cultural team approves requests.</p>
+      <h1>Preferences &amp; calendar</h1>
+      <p class="note">Choose preferred evenings inside the 6–9 PM window (15‑minute start and length). Submit several days at once. Approved dates light up green below.</p>
+      <div id="cal-approved" class="cal-month" aria-label="Approved dates"></div>
       <div class="row-2">
         <label>Event
           <select id="cal-event"></select>
         </label>
-        <label>Your group
+        <label>Your team
           <select id="cal-group"></select>
         </label>
       </div>
@@ -112,16 +113,27 @@
         <textarea id="cal-reqs" placeholder="e.g. need props table and logistics help"></textarea>
       </label>
       <div id="cal-sessions" class="list"></div>
+      <div class="card" id="draft-box" style="margin-top:12px">
+        <h3>Selected preferences</h3>
+        <div id="draft-list" class="muted">None yet — pick start time and length on evenings below, then Add.</div>
+        <div class="actions">
+          <button type="button" id="submit-prefs" class="btn-orange">Submit all preferences</button>
+          <button type="button" id="clear-drafts" class="btn-quiet">Clear</button>
+        </div>
+      </div>
     </section>
 
     <section class="panel" data-page="groups" hidden>
-      <h1>Performance groups</h1>
-      <p class="note">Create the group you coordinate (children’s dance, drama, ensemble, etc.), then book slots from Calendar.</p>
+      <h1>Your team</h1>
+      <p class="note">Create the team you coordinate and leave a comment for which event/program it is. After that you can submit calendar preferences.</p>
       <form id="group-form">
         <div class="row-2">
           <label>Event <select id="grp-event" required></select></label>
-          <label>Group name <input id="grp-name" required placeholder="Children's dance"></label>
+          <label>Team / group name <input id="grp-name" required placeholder="Children's dance"></label>
         </div>
+        <label>Comment for cultural team (required)
+          <textarea id="grp-program" required placeholder="This is for Boishakhi 2027 — children's folk dance segment, ~12 kids"></textarea>
+        </label>
         <div class="row-2">
           <label>Type
             <select id="grp-type">
@@ -142,29 +154,31 @@
           <label>Contact phone <input id="grp-phone"></label>
           <label>Contact email <input id="grp-email" type="email"></label>
         </div>
-        <label id="grp-coord-wrap" hidden>Assign coordinator username
+        <label id="grp-coord-wrap" hidden>Assign coordinator login
           <input id="grp-coord" autocomplete="off" autocapitalize="none">
         </label>
         <label>Special requirements <textarea id="grp-reqs"></textarea></label>
-        <button class="btn-teal" type="submit">Save group</button>
+        <button class="btn-teal" type="submit">Create team</button>
       </form>
       <div class="list" id="group-list" style="margin-top:14px"></div>
     </section>
 
     <section class="panel" data-page="approvals" hidden>
-      <h1>Approvals</h1>
-      <p class="note">Review pending rehearsal requests. Approve, reject, or leave a logistics comment.</p>
+      <h1>Demand &amp; approvals</h1>
+      <p class="note">See preference demand by evening. When enough requests arrive, book the 6–9 PM facility rental, then approve teams so their calendars light up.</p>
+      <div class="list" id="demand-list"></div>
+      <h2 style="margin-top:18px">Pending preferences</h2>
       <div class="list" id="approval-list"></div>
     </section>
 
     <section class="panel" data-page="bookings" hidden>
-      <h1>All bookings</h1>
+      <h1>My preferences</h1>
       <div class="list" id="booking-list"></div>
     </section>
 
     <section class="panel" data-page="events" hidden>
-      <h1>Events &amp; sessions</h1>
-      <p class="note">Create year-round cultural events (e.g. Boishakhi 2027) and the three-hour gym rentals under each.</p>
+      <h1>Events &amp; evenings</h1>
+      <p class="note">Create cultural events and candidate 6–9 PM evenings for preference collection. Booking the school happens from Approvals when demand is enough.</p>
       <form id="event-form">
         <div class="row-2">
           <label>Event name <input id="evt-name" required placeholder="Boishakhi 2027"></label>
@@ -174,17 +188,17 @@
         <button class="btn-teal" type="submit">Create event</button>
       </form>
       <form id="session-form" style="margin-top:16px">
-        <h2>Add rental session</h2>
+        <h2>Add preference evening (6–9 PM)</h2>
         <div class="row-2">
           <label>Event <select id="sess-event" required></select></label>
           <label>Date <input id="sess-date" type="date" required></label>
         </div>
         <div class="row-2">
-          <label>Start <input id="sess-start" type="time" value="18:00" required></label>
-          <label>End <input id="sess-end" type="time" value="21:00" required></label>
+          <label>Start <input id="sess-start" type="time" value="18:00" step="900" required></label>
+          <label>End <input id="sess-end" type="time" value="21:00" step="900" required></label>
         </div>
-        <label>Notes <input id="sess-notes" placeholder="School-approved evening rental"></label>
-        <button class="btn-orange" type="submit">Add session</button>
+        <label>Notes <input id="sess-notes" placeholder="Open for coordinator preferences"></label>
+        <button class="btn-orange" type="submit">Add evening</button>
       </form>
       <div class="list" id="event-list" style="margin-top:14px"></div>
     </section>

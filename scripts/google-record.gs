@@ -17,7 +17,7 @@ function doPost(e) {
   if (e && e.parameter && e.parameter.payload) raw = e.parameter.payload;
   else if (e && e.postData && e.postData.contents) raw = e.postData.contents;
   var book = JSON.parse(raw);
-  if (!book || book.schemaVersion !== 1 || !Array.isArray(book.accounts)) {
+  if (!book || (book.schemaVersion !== 1 && book.schemaVersion !== 2) || !Array.isArray(book.accounts)) {
     return ContentService.createTextOutput("bad").setMimeType(ContentService.MimeType.TEXT);
   }
   writeBook_(book);

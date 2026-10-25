@@ -266,6 +266,61 @@ label textarea { min-height: 88px; resize: vertical; }
   background: #fff1e6;
 }
 
+.cal-month {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.cal-day {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fff;
+  min-height: 72px;
+}
+
+.cal-day.lit {
+  background: linear-gradient(160deg, #d8f5eb, #e7f6f0);
+  border-color: #7bc4ae;
+  box-shadow: 0 0 0 2px rgba(21, 122, 98, 0.2);
+}
+
+.cal-day.pending-day {
+  background: #fff8e8;
+  border-color: #e7c47a;
+}
+
+.cal-day .day-label {
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.cal-day .day-times {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.pref-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: end;
+  margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+  .pref-row { grid-template-columns: 1fr; }
+}
+
+.demand-count {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--teal-dark);
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

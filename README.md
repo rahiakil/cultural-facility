@@ -27,11 +27,11 @@ New coordinators register from the landing page. Status starts as **pending** un
 
 ## How booking works
 
-1. Admin/cultural create an **event** (seeded: **Boishakhi 2027**) and **three-hour rental sessions**.
-2. Coordinator creates a **group** under that event (e.g. children’s dance).
-3. On **Calendar**, pick open hour slots inside a rental (e.g. 6–7, 7–8, 8–9).
-4. Each group has a **max slots** limit (default 4, set per event).
-5. Cultural team **Approvals** page approves or rejects; comments cover props/logistics.
+1. Coordinator **registers** (email as login works). Status is **pending** until cultural approves — no booking until then.
+2. After approval, coordinator creates a **team** with a required **program comment** (which event/segment).
+3. Admin/cultural publish candidate **6–9 PM evenings** under an event (seeded: **Boishakhi 2027**).
+4. Coordinator picks **multiple preferred dates**, each with start time and length in **15-minute** steps inside 6–9 PM, then submits them all.
+5. Cultural **Demand** page shows how many preferences landed on each evening. When enough, they **Book facility** for that night, then **Approve** teams — approved dates **light up green** on the coordinator calendar.
 
 ## File-based storage (same idea as ticket tracker)
 

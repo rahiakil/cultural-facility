@@ -6,22 +6,29 @@
   ];
 
   const BOOKING_STATUSES = ["pending", "approved", "rejected", "cancelled"];
+  const WINDOW_START = "18:00";
+  const WINDOW_END = "21:00";
+  const STEP_MINUTES = 15;
 
   function emptyBook() {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       facility: {
         name: "Samantha Smith Elementary Gym",
         address: "23305 NE 14th St, Sammamish, WA 98074",
         mapsUrl: "https://share.google/C8C33ynszqGr7fR40",
         sessionCost: 70,
         sessionHours: 3,
+        windowStart: WINDOW_START,
+        windowEnd: WINDOW_END,
+        stepMinutes: STEP_MINUTES,
       },
       settings: {
-        defaultMaxSlotsPerGroup: 4,
+        defaultMaxSlotsPerGroup: 6,
         recommendAdultPerKids: 10,
         cancelNoticeHours: 72,
         requestLeadDays: 14,
+        minDemandToBook: 1,
       },
       accounts: [],
       events: [],
@@ -46,7 +53,19 @@
   }
 
   function cleanUsername(value) {
-    return cleanText(value, 40).toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    return cleanText(value, 80).toLowerCase().replace(/[^a-z0-9._@+-]/g, "");
+  }
+
+  function toMinutes(hhmm) {
+    const [h, m] = String(hhmm || "").split(":").map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return NaN;
+    return h * 60 + m;
+  }
+
+  function fromMinutes(total) {
+    const h = Math.floor(total / 60);
+    const m = total % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
 
   function pushLog(book, action, actor, detail) {
@@ -88,33 +107,54 @@
     );
   }
 
-  function slotTaken(book, sessionId, slotStart, ignoreId) {
-    return (book.bookings || []).some(
-      (b) =>
-        b.sessionId === sessionId &&
-        b.slotStart === slotStart &&
-        (b.status === "pending" || b.status === "approved") &&
-        b.id !== ignoreId
-    );
+  function windowBounds(session) {
+    const start = (session && session.start) || WINDOW_START;
+    const end = (session && session.end) || WINDOW_END;
+    return { start, end, startMin: toMinutes(start), endMin: toMinutes(end) };
+  }
+
+  /** 15-minute start times that fit inside the 6–9 PM window for a given duration. */
+  function startOptions(session, durationMinutes) {
+    const dur = Number(durationMinutes) || STEP_MINUTES;
+    const { startMin, endMin } = windowBounds(session);
+    const options = [];
+    for (let t = startMin; t + dur <= endMin; t += STEP_MINUTES) {
+      options.push(fromMinutes(t));
+    }
+    return options;
+  }
+
+  function durationOptions(session, start) {
+    const { endMin } = windowBounds(session);
+    const startMin = toMinutes(start);
+    if (Number.isNaN(startMin)) return [];
+    const options = [];
+    for (let dur = STEP_MINUTES; startMin + dur <= endMin; dur += STEP_MINUTES) {
+      options.push(dur);
+    }
+    return options;
   }
 
   function hourSlots(start, end) {
-    const [sh, sm] = String(start).split(":").map(Number);
-    const [eh, em] = String(end).split(":").map(Number);
-    const slots = [];
-    let h = sh;
-    let m = sm || 0;
-    const endMin = eh * 60 + (em || 0);
-    while (h * 60 + m + 60 <= endMin) {
-      const nextH = m + 60 >= 60 ? h + 1 : h;
-      const nextM = (m + 60) % 60;
-      const from = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-      const to = `${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
-      slots.push({ start: from, end: to });
-      h = nextH;
-      m = nextM;
-    }
-    return slots;
+    return startOptions({ start, end }, 60).map((s) => ({
+      start: s,
+      end: fromMinutes(toMinutes(s) + 60),
+    }));
+  }
+
+  function demandByDate(book, eventId) {
+    const map = {};
+    (book.bookings || []).forEach((b) => {
+      if (eventId && b.eventId !== eventId) return;
+      if (b.status !== "pending" && b.status !== "approved") return;
+      const key = b.date || "";
+      if (!key) return;
+      if (!map[key]) map[key] = { date: key, pending: 0, approved: 0, total: 0, bookings: [] };
+      map[key][b.status] += 1;
+      map[key].total += 1;
+      map[key].bookings.push(b);
+    });
+    return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
   }
 
   function seedBook() {
@@ -148,7 +188,7 @@
         name: "Boishakhi 2027",
         description: "Uttoron Boishakhi cultural performances. Rehearsals at Samantha Smith Elementary Gym.",
         status: "open",
-        maxSlotsPerGroup: 4,
+        maxSlotsPerGroup: 6,
         createdAt: nowIso(),
       },
     ];
@@ -157,29 +197,31 @@
       id: `sess-${eventId}-${index + 1}`,
       eventId,
       date,
-      start: "18:00",
-      end: "21:00",
-      notes: "Three-hour school rental · setup, rehearsal, cleanup included",
+      start: WINDOW_START,
+      end: WINDOW_END,
+      notes: "Candidate evening · 6–9 PM · preferences in 15-minute steps",
       status: "open",
+      facilityBooked: false,
       createdAt: nowIso(),
     }));
-    pushLog(book, "seed", "system", "Seeded Boishakhi 2027 and default accounts");
+    pushLog(book, "seed", "system", "Seeded Boishakhi 2027 preference evenings");
     return book;
   }
 
   function registerAccount(book, input, actor) {
     const username = cleanUsername(input.username);
-    if (!username || username.length < 3) return { ok: false, message: "Username needs at least 3 letters." };
-    if (findAccount(book, username)) return { ok: false, message: "That username is already taken." };
+    if (!username || username.length < 3) return { ok: false, message: "Use your email or a username (at least 3 characters)." };
+    if (findAccount(book, username)) return { ok: false, message: "That login is already taken." };
     if (!input.hash) return { ok: false, message: "Password is required." };
     const name = cleanText(input.name, 80);
     if (!name) return { ok: false, message: "Name is required." };
+    const email = cleanText(input.email, 120) || (username.includes("@") ? username : "");
     const account = {
       username,
       hash: String(input.hash),
       role: "coordinator",
       name,
-      email: cleanText(input.email, 120),
+      email,
       phone: cleanText(input.phone, 40),
       status: "pending",
       createdAt: nowIso(),
@@ -187,7 +229,11 @@
     };
     book.accounts.push(account);
     pushLog(book, "register", actor || username, `Registered ${username}`);
-    return { ok: true, message: "Registration submitted. Cultural team will activate your login.", account };
+    return {
+      ok: true,
+      message: "Account created. You cannot book until cultural team approves your login.",
+      account,
+    };
   }
 
   function setAccountStatus(book, username, status, actor) {
@@ -211,7 +257,7 @@
         hash: String(input.hash),
         role,
         name: cleanText(input.name, 80) || username,
-        email: cleanText(input.email, 120),
+        email: cleanText(input.email, 120) || (username.includes("@") ? username : ""),
         phone: cleanText(input.phone, 40),
         status: input.status || "active",
         createdAt: nowIso(),
@@ -254,7 +300,7 @@
       name,
       description: cleanText(input.description, 500),
       status: input.status === "closed" ? "closed" : "open",
-      maxSlotsPerGroup: Math.max(1, Number(input.maxSlotsPerGroup) || book.settings.defaultMaxSlotsPerGroup || 4),
+      maxSlotsPerGroup: Math.max(1, Number(input.maxSlotsPerGroup) || book.settings.defaultMaxSlotsPerGroup || 6),
       createdAt: nowIso(),
     };
     book.events.push(event);
@@ -277,10 +323,12 @@
     const event = findEvent(book, input.eventId);
     if (!event) return { ok: false, message: "Pick an event first." };
     const date = cleanText(input.date, 20);
-    const start = cleanText(input.start, 10) || "18:00";
-    const end = cleanText(input.end, 10) || "21:00";
+    const start = cleanText(input.start, 10) || WINDOW_START;
+    const end = cleanText(input.end, 10) || WINDOW_END;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, message: "Use a valid date." };
-    if (hourSlots(start, end).length < 1) return { ok: false, message: "Session must cover at least one hour." };
+    if (!(toMinutes(end) - toMinutes(start) >= STEP_MINUTES)) {
+      return { ok: false, message: "Evening window must be at least 15 minutes." };
+    }
     const session = {
       id: newId("sess"),
       eventId: event.id,
@@ -289,25 +337,36 @@
       end,
       notes: cleanText(input.notes, 300),
       status: "open",
+      facilityBooked: false,
       createdAt: nowIso(),
     };
     book.sessions.push(session);
     book.sessions.sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`));
     pushLog(book, "session-create", actor, `${event.name} ${date} ${start}-${end}`);
-    return { ok: true, message: "Session added.", session };
+    return { ok: true, message: "Preference evening added.", session };
+  }
+
+  function bookFacilitySession(book, sessionId, actor, note) {
+    const session = findSession(book, sessionId);
+    if (!session) return { ok: false, message: "Evening not found." };
+    session.facilityBooked = true;
+    session.status = "booked";
+    if (note) session.notes = cleanText(note, 300);
+    pushLog(book, "facility-book", actor, `${session.date} ${session.start}-${session.end}`);
+    return { ok: true, message: `Facility rental marked booked for ${session.date}.`, session };
   }
 
   function deleteSession(book, sessionId, actor) {
     const session = findSession(book, sessionId);
     if (!session) return { ok: false, message: "Session not found." };
     const busy = (book.bookings || []).some(
-      (b) => b.sessionId === sessionId && (b.status === "pending" || b.status === "approved")
+      (b) => (b.sessionId === sessionId || b.date === session.date) && (b.status === "pending" || b.status === "approved")
     );
-    if (busy) return { ok: false, message: "Cancel or reject bookings on this session first." };
+    if (busy) return { ok: false, message: "Cancel or reject preferences on this evening first." };
     book.sessions = book.sessions.filter((s) => s.id !== sessionId);
     book.bookings = book.bookings.filter((b) => b.sessionId !== sessionId);
     pushLog(book, "session-delete", actor, sessionId);
-    return { ok: true, message: "Session removed." };
+    return { ok: true, message: "Evening removed." };
   }
 
   function createGroup(book, input, actor) {
@@ -315,6 +374,10 @@
     if (!event) return { ok: false, message: "Pick an event." };
     const name = cleanText(input.name, 120);
     if (!name) return { ok: false, message: "Group name required." };
+    const programComment = cleanText(input.programComment, 500);
+    if (!programComment) {
+      return { ok: false, message: "Add a short comment: which event/program this team is for." };
+    }
     const coordinatorUsername = cleanUsername(input.coordinatorUsername || actor);
     const group = {
       id: newId("grp"),
@@ -327,13 +390,14 @@
       contactEmail: cleanText(input.contactEmail, 120),
       participantEstimate: Math.max(0, Number(input.participantEstimate) || 0),
       ageGroups: cleanText(input.ageGroups, 80),
+      programComment,
       specialRequirements: cleanText(input.specialRequirements, 500),
       status: "active",
       createdAt: nowIso(),
     };
     book.groups.push(group);
-    pushLog(book, "group-create", actor, `${name} for ${event.name}`);
-    return { ok: true, message: `Created group ${name}.`, group };
+    pushLog(book, "group-create", actor, `${name} for ${event.name}: ${programComment}`);
+    return { ok: true, message: `Team created for ${event.name}. You can now submit date preferences.`, group };
   }
 
   function updateGroup(book, groupId, input, actor) {
@@ -347,6 +411,7 @@
     if (input.contactEmail != null) group.contactEmail = cleanText(input.contactEmail, 120);
     if (input.participantEstimate != null) group.participantEstimate = Math.max(0, Number(input.participantEstimate) || 0);
     if (input.ageGroups != null) group.ageGroups = cleanText(input.ageGroups, 80);
+    if (input.programComment != null) group.programComment = cleanText(input.programComment, 500);
     if (input.specialRequirements != null) group.specialRequirements = cleanText(input.specialRequirements, 500);
     if (input.status) group.status = input.status === "archived" ? "archived" : "active";
     pushLog(book, "group-update", actor, group.name);
@@ -357,60 +422,113 @@
     const group = findGroup(book, groupId);
     if (!group) return { ok: false, message: "Group not found." };
     const busy = activeBookingsForGroup(book, groupId).length;
-    if (busy) return { ok: false, message: "Cancel active bookings before deleting the group." };
+    if (busy) return { ok: false, message: "Cancel active preferences before deleting the group." };
     book.groups = book.groups.filter((g) => g.id !== groupId);
     book.bookings = book.bookings.filter((b) => b.groupId !== groupId);
     pushLog(book, "group-delete", actor, group.name);
     return { ok: true, message: "Group deleted." };
   }
 
-  function createBooking(book, input, actor) {
+  function migrateBooking(booking, book) {
+    if (!booking) return booking;
+    if (booking.date && booking.start && booking.end) {
+      booking.durationMinutes = booking.durationMinutes || (toMinutes(booking.end) - toMinutes(booking.start));
+      return booking;
+    }
+    const session = findSession(book, booking.sessionId);
+    booking.date = booking.date || (session && session.date) || "";
+    booking.start = booking.start || booking.slotStart || "";
+    booking.end = booking.end || booking.slotEnd || "";
+    if (booking.start && booking.end) {
+      booking.durationMinutes = toMinutes(booking.end) - toMinutes(booking.start);
+    }
+    booking.kind = booking.kind || "preference";
+    return booking;
+  }
+
+  function createPreferences(book, input, actor) {
     const group = findGroup(book, input.groupId);
-    if (!group || group.status !== "active") return { ok: false, message: "Group not found." };
+    if (!group || group.status !== "active") return { ok: false, message: "Create your team first." };
     const event = findEvent(book, group.eventId);
-    if (!event || event.status !== "open") return { ok: false, message: "Event is not open for booking." };
-    const session = findSession(book, input.sessionId);
-    if (!session || session.eventId !== event.id || session.status !== "open") {
-      return { ok: false, message: "Session not available." };
+    if (!event || event.status !== "open") return { ok: false, message: "Event is not open." };
+    const prefs = Array.isArray(input.preferences) ? input.preferences : [input];
+    if (!prefs.length) return { ok: false, message: "Add at least one preferred date and time." };
+
+    const max = event.maxSlotsPerGroup || book.settings.defaultMaxSlotsPerGroup || 6;
+    const already = activeBookingsForGroup(book, group.id).length;
+    if (already + prefs.length > max) {
+      return { ok: false, message: `This team may hold at most ${max} active preferences (you have ${already}).` };
     }
-    const slotStart = cleanText(input.slotStart, 10);
-    const slots = hourSlots(session.start, session.end);
-    const slot = slots.find((s) => s.start === slotStart);
-    if (!slot) return { ok: false, message: "Pick a valid hour slot." };
-    if (slotTaken(book, session.id, slotStart)) return { ok: false, message: "That slot is already requested or approved." };
-    const max = event.maxSlotsPerGroup || book.settings.defaultMaxSlotsPerGroup || 4;
-    if (activeBookingsForGroup(book, group.id).length >= max) {
-      return { ok: false, message: `This group already has ${max} active slot(s).` };
+
+    const created = [];
+    for (const pref of prefs) {
+      const session = findSession(book, pref.sessionId);
+      if (!session || session.eventId !== event.id || (session.status !== "open" && session.status !== "booked")) {
+        return { ok: false, message: "Pick a valid preference evening." };
+      }
+      const durationMinutes = Number(pref.durationMinutes) || 60;
+      if (durationMinutes % STEP_MINUTES !== 0 || durationMinutes < STEP_MINUTES) {
+        return { ok: false, message: "Duration must be in 15-minute steps." };
+      }
+      const start = cleanText(pref.start, 10);
+      const allowed = startOptions(session, durationMinutes);
+      if (!allowed.includes(start)) {
+        return { ok: false, message: `Start time must fit in ${session.start}–${session.end} for that duration.` };
+      }
+      const end = fromMinutes(toMinutes(start) + durationMinutes);
+      const duplicate = (book.bookings || []).some(
+        (b) =>
+          b.groupId === group.id &&
+          b.date === session.date &&
+          b.start === start &&
+          b.end === end &&
+          (b.status === "pending" || b.status === "approved")
+      );
+      if (duplicate) return { ok: false, message: `You already requested ${session.date} ${start}–${end}.` };
+
+      const booking = {
+        id: newId("bk"),
+        kind: "preference",
+        eventId: event.id,
+        groupId: group.id,
+        sessionId: session.id,
+        date: session.date,
+        start,
+        end,
+        durationMinutes,
+        slotStart: start,
+        slotEnd: end,
+        kidsCount: Math.max(0, Number(input.kidsCount != null ? input.kidsCount : pref.kidsCount) || group.participantEstimate || 0),
+        pointOfContact: cleanText(input.pointOfContact || pref.pointOfContact, 80) || group.contactName || group.coordinatorUsername,
+        specialRequirements: cleanText(input.specialRequirements || pref.specialRequirements, 500) || group.specialRequirements || "",
+        comments: [],
+        status: "pending",
+        requestedBy: cleanUsername(actor),
+        requestedAt: nowIso(),
+        reviewedBy: "",
+        reviewedAt: "",
+      };
+      book.bookings.push(booking);
+      created.push(booking);
+      pushLog(book, "preference-create", actor, `${group.name} ${session.date} ${start}–${end}`);
     }
-    const booking = {
-      id: newId("bk"),
-      eventId: event.id,
-      groupId: group.id,
-      sessionId: session.id,
-      slotStart: slot.start,
-      slotEnd: slot.end,
-      kidsCount: Math.max(0, Number(input.kidsCount) || group.participantEstimate || 0),
-      pointOfContact: cleanText(input.pointOfContact, 80) || group.contactName || group.coordinatorUsername,
-      specialRequirements: cleanText(input.specialRequirements, 500) || group.specialRequirements || "",
-      comments: [],
-      status: "pending",
-      requestedBy: cleanUsername(actor),
-      requestedAt: nowIso(),
-      reviewedBy: "",
-      reviewedAt: "",
+
+    return {
+      ok: true,
+      message: `Submitted ${created.length} day preference(s). Cultural team will book the gym when demand is enough.`,
+      bookings: created,
     };
-    book.bookings.push(booking);
-    pushLog(book, "booking-create", actor, `${group.name} ${session.date} ${slot.start}`);
-    return { ok: true, message: "Booking submitted for approval.", booking };
+  }
+
+  function createBooking(book, input, actor) {
+    return createPreferences(book, input, actor);
   }
 
   function setBookingStatus(book, bookingId, status, actor, note) {
     const booking = findBooking(book, bookingId);
-    if (!booking) return { ok: false, message: "Booking not found." };
+    if (!booking) return { ok: false, message: "Preference not found." };
+    migrateBooking(booking, book);
     if (!BOOKING_STATUSES.includes(status)) return { ok: false, message: "Bad status." };
-    if (status === "approved" && slotTaken(book, booking.sessionId, booking.slotStart, booking.id)) {
-      return { ok: false, message: "Another booking already holds this slot." };
-    }
     booking.status = status;
     booking.reviewedBy = cleanUsername(actor);
     booking.reviewedAt = nowIso();
@@ -423,12 +541,12 @@
       });
     }
     pushLog(book, "booking-status", actor, `${bookingId} → ${status}`);
-    return { ok: true, message: `Booking ${status}.`, booking };
+    return { ok: true, message: status === "approved" ? "Approved — coordinator calendar will light up." : `Preference ${status}.`, booking };
   }
 
   function addBookingComment(book, bookingId, text, actor) {
     const booking = findBooking(book, bookingId);
-    if (!booking) return { ok: false, message: "Booking not found." };
+    if (!booking) return { ok: false, message: "Preference not found." };
     const body = cleanText(text, 500);
     if (!body) return { ok: false, message: "Comment required." };
     booking.comments.push({
@@ -444,9 +562,9 @@
   function deleteBooking(book, bookingId, actor) {
     const before = book.bookings.length;
     book.bookings = book.bookings.filter((b) => b.id !== bookingId);
-    if (book.bookings.length === before) return { ok: false, message: "Booking not found." };
+    if (book.bookings.length === before) return { ok: false, message: "Preference not found." };
     pushLog(book, "booking-delete", actor, bookingId);
-    return { ok: true, message: "Booking deleted." };
+    return { ok: true, message: "Preference deleted." };
   }
 
   function stats(book, days) {
@@ -455,8 +573,7 @@
       const t = Date.parse(`${s.date}T12:00:00`);
       return !Number.isNaN(t) && t >= cutoff;
     });
-    const recentIds = new Set(recentSessions.map((s) => s.id));
-    const bookings = (book.bookings || []).filter((b) => recentIds.has(b.sessionId) || Date.parse(b.requestedAt || 0) >= cutoff);
+    const bookings = (book.bookings || []).filter((b) => Date.parse(b.requestedAt || 0) >= cutoff || recentSessions.some((s) => s.id === b.sessionId || s.date === b.date));
     const byStatus = {};
     BOOKING_STATUSES.forEach((s) => { byStatus[s] = 0; });
     bookings.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
@@ -469,14 +586,15 @@
       byCoordinator[key][b.status] = (byCoordinator[key][b.status] || 0) + 1;
     });
     const usedSlots = bookings.filter((b) => b.status === "approved").length;
-    const availableSlots = recentSessions.reduce((sum, s) => sum + hourSlots(s.start, s.end).length, 0);
+    const facilityBooked = recentSessions.filter((s) => s.facilityBooked || s.status === "booked").length;
     return {
       days: Number(days) || 30,
       sessionsBooked: recentSessions.length,
-      availableSlots,
+      facilityBooked,
+      availableSlots: recentSessions.length,
       usedSlots,
-      unusedSlots: Math.max(0, availableSlots - usedSlots),
-      utilization: availableSlots ? Math.round((usedSlots / availableSlots) * 100) : 0,
+      unusedSlots: Math.max(0, recentSessions.length - facilityBooked),
+      utilization: recentSessions.length ? Math.round((facilityBooked / recentSessions.length) * 100) : 0,
       byStatus,
       byCoordinator,
       bookingCount: bookings.length,
@@ -486,7 +604,7 @@
   function normalizeBook(raw) {
     const base = emptyBook();
     if (!raw || typeof raw !== "object") return base;
-    return {
+    const book = {
       ...base,
       ...raw,
       facility: { ...base.facility, ...(raw.facility || {}) },
@@ -497,25 +615,40 @@
       groups: Array.isArray(raw.groups) ? raw.groups : [],
       bookings: Array.isArray(raw.bookings) ? raw.bookings : [],
       log: Array.isArray(raw.log) ? raw.log : [],
-      schemaVersion: 1,
+      schemaVersion: 2,
     };
+    book.sessions.forEach((s) => {
+      if (s.facilityBooked == null) s.facilityBooked = s.status === "booked";
+    });
+    book.groups.forEach((g) => {
+      if (g.programComment == null) g.programComment = g.specialRequirements || "";
+    });
+    book.bookings.forEach((b) => migrateBooking(b, book));
+    return book;
   }
 
   root.CulturalStore = {
     ROLES,
     BOOKING_STATUSES,
+    WINDOW_START,
+    WINDOW_END,
+    STEP_MINUTES,
     emptyBook,
     seedBook,
     normalizeBook,
     newId,
     hourSlots,
+    startOptions,
+    durationOptions,
+    toMinutes,
+    fromMinutes,
+    demandByDate,
     findAccount,
     findEvent,
     findGroup,
     findSession,
     findBooking,
     activeBookingsForGroup,
-    slotTaken,
     registerAccount,
     setAccountStatus,
     upsertAccount,
@@ -523,11 +656,13 @@
     createEvent,
     updateEvent,
     createSession,
+    bookFacilitySession,
     deleteSession,
     createGroup,
     updateGroup,
     deleteGroup,
     createBooking,
+    createPreferences,
     setBookingStatus,
     addBookingComment,
     deleteBooking,

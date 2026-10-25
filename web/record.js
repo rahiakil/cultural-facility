@@ -66,7 +66,7 @@
       }
       if (missing) book = root.CulturalStore.seedBook();
       book = root.CulturalStore.normalizeBook(book);
-      if (!book || book.schemaVersion !== 1) return { ok: false, message: "Could not save—record file was not readable." };
+      if (!book || (book.schemaVersion !== 1 && book.schemaVersion !== 2)) return { ok: false, message: "Could not save—record file was not readable." };
       const changed = mutate(book);
       if (!changed.write) {
         if (missing) return { ok: false, missing: true, message: "" };
