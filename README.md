@@ -35,14 +35,22 @@ New coordinators register from the landing page. Status starts as **pending** un
 
 ## File-based storage (same idea as ticket tracker)
 
-- Browser keeps a local copy of the book JSON.
-- **Admin → Download JSON / Import JSON** to move data between devices.
-- Optional shared Drive file via Google Apps Script (`scripts/google-record.gs`):
-  1. Create a new Apps Script project, paste `scripts/google-record.gs`.
-  2. Deploy → Web app → Execute as Me → Who has access: Anyone.
-  3. Paste the `/exec` URL into Admin → Sync on the site.
+**Where the live data is**
 
-Seed data also ships as `web/live.json` for first load / GitHub Pages.
+| Place | What it is |
+| --- | --- |
+| Browser **localStorage** | Default working copy on each phone/laptop (includes full activity `log`) |
+| **Download JSON** (Admin) | Portable file of the whole book — accounts, events, prefs, log |
+| Google Drive via Apps Script | Optional shared file so cultural/admin see the same data |
+| `web/live.json` on GitHub Pages | Seed only — not updated by bookings |
+
+Optional shared Drive file (`scripts/google-record.gs`):
+
+1. Create a new Apps Script project, paste `scripts/google-record.gs`.
+2. Deploy → Web app → Execute as Me → Who has access: Anyone.
+3. Paste the `/exec` URL into Admin → Sync on the site.
+
+Cultural can approve / disable / reinstate **coordinators only** (not cultural or admin). Login always asks for a **display name** used in the activity log.
 
 ## Local preview
 

@@ -65,9 +65,11 @@
   <main id="login-screen" class="screen" hidden>
     <form id="login-form" class="panel">
       <h1>Log in</h1>
+      <p class="note">Enter your login, password, and your name for the activity log (required for cultural and admin).</p>
       <p id="login-error" class="result bad" hidden></p>
       <label>Username <input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
       <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+      <label>Your name (for logging) <input id="display-name" autocomplete="name" required placeholder="e.g. Priya Sharma"></label>
       <button class="btn-orange" type="submit">Log in</button>
       <button id="login-back" class="text-button" type="button">Back</button>
     </form>
@@ -94,8 +96,20 @@
 
     <section class="panel" data-page="calendar" hidden>
       <h1>Preferences &amp; calendar</h1>
-      <p class="note">Choose preferred evenings inside the 6–9 PM window (15‑minute start and length). Submit several days at once. Approved dates light up green below.</p>
-      <div id="cal-approved" class="cal-month" aria-label="Approved dates"></div>
+      <p class="note">Browse every month. Green = approved, amber = pending preference, teal outline = evening open for prefs. Click a day to add a preference (15‑minute steps, 6–9 PM).</p>
+      <div class="month-nav">
+        <button type="button" id="cal-prev" class="btn-quiet">Previous</button>
+        <h2 id="cal-month-label"></h2>
+        <button type="button" id="cal-next" class="btn-quiet">Next</button>
+      </div>
+      <div class="cal-legend">
+        <span><i class="swatch open"></i> Open evening</span>
+        <span><i class="swatch pending-day"></i> Pending</span>
+        <span><i class="swatch lit"></i> Approved</span>
+        <span><i class="swatch booked"></i> Facility booked</span>
+      </div>
+      <div id="month-grid" class="month-grid" aria-label="Month calendar"></div>
+      <p class="muted" id="cal-day-detail">Select a day on the calendar.</p>
       <div class="row-2">
         <label>Event
           <select id="cal-event"></select>
@@ -236,6 +250,12 @@
       <div class="list" id="people-list" style="margin-top:14px"></div>
     </section>
 
+    <section class="panel" data-page="log" hidden>
+      <h1>Activity log</h1>
+      <p class="note">Everything is written into the shared book file (<code>log</code> array). Download JSON from Admin to keep a copy.</p>
+      <div class="list" id="log-list"></div>
+    </section>
+
     <section class="panel" data-page="stats" hidden>
       <h1>Usage statistics</h1>
       <label>Window
@@ -257,7 +277,7 @@
 
     <section class="panel" data-page="admin" hidden>
       <h1>Admin tools</h1>
-      <p class="note">Shared file sync (same pattern as ticket tracker), import/export, and danger-zone cleanup.</p>
+      <p class="note"><strong>Where data lives:</strong> (1) this browser’s local storage by default, (2) Download JSON file for a portable copy of accounts/events/prefs/log, (3) optional Google Drive text file via Apps Script record URL (same pattern as ticket tracker). GitHub Pages only hosts the app + seed <code>live.json</code> — live bookings are not written to the GitHub repo unless you sync.</p>
       <label>Google Apps Script record URL
         <input id="record-url" placeholder="https://script.google.com/macros/s/…/exec">
       </label>

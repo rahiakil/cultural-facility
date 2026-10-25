@@ -7,9 +7,13 @@ function storeKey(name) {
 }
 
 const SESSION_KEY = storeKey("session");
+const ALIAS_KEY = storeKey("alias");
 const BOOK_KEY = storeKey("book");
 const RECORD_KEY = storeKey("record-url");
 const SESSION_MS = 14 * 24 * 60 * 60 * 1000;
+const nowCal = new Date();
+let calView = { year: nowCal.getFullYear(), month: nowCal.getMonth() };
+let selectedCalDate = "";
 
 const gate = document.querySelector("#gate");
 const policyScreen = document.querySelector("#policy-screen");
@@ -73,8 +77,18 @@ function loadSession() {
 
 function saveSession(next) {
   session = next;
-  if (!next) localStorage.removeItem(SESSION_KEY);
-  else localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+  if (!next) {
+    localStorage.removeItem(SESSION_KEY);
+    return;
+  }
+  localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+  if (next.displayName) localStorage.setItem(ALIAS_KEY, next.displayName);
+}
+
+function actor() {
+  if (!session) return "unknown";
+  const name = String(session.displayName || localStorage.getItem(ALIAS_KEY) || "").trim();
+  return name ? `${name} (${session.username})` : session.username;
 }
 
 function recordUrlValue() {
@@ -174,6 +188,7 @@ function tabsForRole(role) {
     base.splice(3, 0, ["approvals", "Demand"]);
     base.push(["events", "Events"]);
     base.push(["people", "People"]);
+    base.push(["log", "Log"]);
     base.push(["stats", "Stats"]);
   }
   if (role === "admin") base.push(["admin", "Admin"]);
@@ -263,7 +278,8 @@ function bookingWhen(b) {
 
 function renderHome() {
   const account = currentAccount();
-  document.querySelector("#who").textContent = `${account.name || account.username}`;
+  const alias = session.displayName || account.name || account.username;
+  document.querySelector("#who").textContent = `${alias} · ${account.username}`;
   document.querySelector("#who-role").textContent = S.ROLES.find((r) => r[0] === account.role)?.[1] || account.role;
   const teams = myGroups().length;
   document.querySelector("#home-blurb").textContent =
@@ -314,32 +330,89 @@ function renderHome() {
     : `<p class="muted">Nothing waiting right now.</p>`;
 }
 
-function renderApprovedCalendar() {
-  const host = document.querySelector("#cal-approved");
+function dateKey(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function bookingsForDate(date, eventId) {
   const account = currentAccount();
-  const mine = (book.bookings || []).filter((b) => {
+  return (book.bookings || []).filter((b) => {
+    if (b.date !== date) return false;
+    if (eventId && b.eventId !== eventId) return false;
     const g = S.findGroup(book, b.groupId);
-    if (!g) return false;
-    if (account.role === "coordinator" && g.coordinatorUsername !== account.username) return false;
-    return b.status === "approved" || b.status === "pending";
+    if (account.role === "coordinator") {
+      return g && g.coordinatorUsername === account.username;
+    }
+    return true;
   });
-  if (!mine.length) {
-    host.innerHTML = `<p class="muted">Approved evenings will light up here after cultural confirms your preferences.</p>`;
+}
+
+function renderMonthGrid() {
+  const host = document.querySelector("#month-grid");
+  const label = document.querySelector("#cal-month-label");
+  const eventId = document.querySelector("#cal-event")?.value;
+  const year = calView.year;
+  const month = calView.month;
+  label.textContent = new Date(year, month, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+
+  const firstDow = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const sessions = (book.sessions || []).filter((s) => !eventId || s.eventId === eventId);
+  const byDate = {};
+  sessions.forEach((s) => { byDate[s.date] = s; });
+
+  const dows = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  let html = dows.map((d) => `<div class="month-dow">${d}</div>`).join("");
+  for (let i = 0; i < firstDow; i += 1) html += `<button type="button" class="month-cell outside" disabled></button>`;
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = dateKey(year, month, day);
+    const sess = byDate[key];
+    const prefs = bookingsForDate(key, eventId);
+    const approved = prefs.some((b) => b.status === "approved");
+    const pending = prefs.some((b) => b.status === "pending");
+    const booked = sess && (sess.facilityBooked || sess.status === "booked");
+    const classes = ["month-cell"];
+    if (sess) classes.push("open-eve");
+    if (booked) classes.push("booked");
+    if (approved) classes.push("lit");
+    else if (pending) classes.push("pending-day");
+    if (selectedCalDate === key) classes.push("selected");
+    const marks = [];
+    if (sess) marks.push(booked ? "booked" : "open");
+    if (approved) marks.push("approved");
+    else if (pending) marks.push("pending");
+    html += `<button type="button" class="${classes.join(" ")}" data-cal-date="${key}" ${sess ? "" : ""}>
+      <span class="num">${day}</span>
+      <span class="marks">${escapeHtml(marks.join(" · ") || "—")}</span>
+    </button>`;
+  }
+  host.innerHTML = html;
+  host.querySelectorAll("[data-cal-date]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedCalDate = btn.dataset.calDate;
+      renderCalendar();
+      const card = document.querySelector(`[data-session-card][data-date="${selectedCalDate}"], [data-session-card]`);
+      const match = document.querySelector(`[data-session-date="${selectedCalDate}"]`);
+      if (match) match.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      else if (card) {/* stay */}
+    });
+  });
+
+  const detail = document.querySelector("#cal-day-detail");
+  if (!selectedCalDate) {
+    detail.textContent = "Select a day on the calendar. Use Previous / Next to move through every month.";
     return;
   }
-  const byDate = {};
-  mine.forEach((b) => {
-    if (!byDate[b.date]) byDate[b.date] = [];
-    byDate[b.date].push(b);
-  });
-  host.innerHTML = Object.keys(byDate).sort().map((date) => {
-    const items = byDate[date];
-    const lit = items.some((b) => b.status === "approved");
-    const pending = items.some((b) => b.status === "pending");
-    const cls = lit ? "cal-day lit" : pending ? "cal-day pending-day" : "cal-day";
-    const times = items.map((b) => `${b.start}–${b.end} (${b.status})`).join(" · ");
-    return `<div class="${cls}"><p class="day-label">${escapeHtml(formatDate(date))}</p><p class="day-times">${escapeHtml(times)}</p></div>`;
-  }).join("");
+  const sess = byDate[selectedCalDate] || (book.sessions || []).find((s) => s.date === selectedCalDate && (!eventId || s.eventId === eventId));
+  const prefs = bookingsForDate(selectedCalDate, eventId);
+  if (!sess && !prefs.length) {
+    detail.textContent = `${formatDate(selectedCalDate)} — no preference evening configured for this event. Cultural/admin can add it under Events.`;
+    return;
+  }
+  const prefText = prefs.length
+    ? prefs.map((b) => `${b.start}–${b.end} (${b.status})`).join("; ")
+    : "no preferences yet";
+  detail.innerHTML = `<strong>${escapeHtml(formatDate(selectedCalDate))}</strong> · ${sess ? `${sess.start}–${sess.end}` : ""} · ${escapeHtml(prefText)}`;
 }
 
 function renderDraftList() {
@@ -367,25 +440,29 @@ function renderDraftList() {
 function renderCalendar() {
   fillEventSelects();
   fillGroupSelect();
-  renderApprovedCalendar();
+  renderMonthGrid();
   renderDraftList();
 
   const eventId = document.querySelector("#cal-event").value;
   const groupId = document.querySelector("#cal-group").value;
-  const sessions = (book.sessions || [])
+  let sessions = (book.sessions || [])
     .filter((s) => s.eventId === eventId && (s.status === "open" || s.status === "booked"))
     .sort((a, b) => a.date.localeCompare(b.date));
+  if (selectedCalDate) {
+    const focused = sessions.filter((s) => s.date === selectedCalDate);
+    if (focused.length) sessions = focused.concat(sessions.filter((s) => s.date !== selectedCalDate));
+  }
   const event = S.findEvent(book, eventId);
   const max = event ? event.maxSlotsPerGroup : 6;
   const used = groupId ? S.activeBookingsForGroup(book, groupId).length : 0;
   const host = document.querySelector("#cal-sessions");
 
-  if (!myGroups().length) {
+  if (!can("cultural") && !myGroups().length) {
     host.innerHTML = `<p class="muted">Create your team under <strong>My team</strong> first (with a program comment). Then return here to pick preferred dates.</p>`;
     return;
   }
   if (!sessions.length) {
-    host.innerHTML = `<p class="muted">No preference evenings yet for this event. Cultural/admin adds 6–9 PM dates under Events.</p>`;
+    host.innerHTML = `<p class="muted">No preference evenings yet for this event. Cultural/admin adds 6–9 PM dates under Events. Use the month grid above to browse all dates.</p>`;
     return;
   }
 
@@ -395,7 +472,8 @@ function renderCalendar() {
     const bookedBadge = sess.facilityBooked || sess.status === "booked"
       ? `<span class="badge approved">facility booked</span>`
       : `<span class="badge open">collecting prefs</span>`;
-    return `<div class="card" data-session-card="${sess.id}">
+    const highlight = selectedCalDate === sess.date ? " style=\"outline:2px solid var(--orange)\"" : "";
+    return `<div class="card" data-session-card="${sess.id}" data-session-date="${sess.date}"${highlight}>
       <h3>${escapeHtml(formatDate(sess.date))} ${bookedBadge}</h3>
       <p class="meta">${sess.start}–${sess.end}${sess.notes ? ` · ${escapeHtml(sess.notes)}` : ""}</p>
       <div class="pref-row">
@@ -467,7 +545,7 @@ function renderGroups() {
   host.querySelectorAll("[data-del-group]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this team?")) return;
-      const result = await mutateBook((b) => S.deleteGroup(b, btn.dataset.delGroup, session.username));
+      const result = await mutateBook((b) => S.deleteGroup(b, btn.dataset.delGroup, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -525,7 +603,7 @@ function renderApprovals() {
 
   demandHost.querySelectorAll("[data-book-facility]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const result = await mutateBook((b) => S.bookFacilitySession(b, btn.dataset.bookFacility, session.username, "School rental confirmed by cultural team"));
+      const result = await mutateBook((b) => S.bookFacilitySession(b, btn.dataset.bookFacility, actor(), "School rental confirmed by cultural team"));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -577,7 +655,7 @@ function wireBookingActions(host) {
   host.querySelectorAll("[data-approve]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const note = host.querySelector(`[data-comment="${btn.dataset.approve}"]`)?.value || "";
-      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.approve, "approved", session.username, note));
+      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.approve, "approved", actor(), note));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -585,14 +663,14 @@ function wireBookingActions(host) {
   host.querySelectorAll("[data-reject]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const note = host.querySelector(`[data-comment="${btn.dataset.reject}"]`)?.value || "";
-      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.reject, "rejected", session.username, note));
+      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.reject, "rejected", actor(), note));
       flash(result.message, !result.ok);
       renderPage();
     });
   });
   host.querySelectorAll("[data-cancel]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.cancel, "cancelled", session.username, "Cancelled"));
+      const result = await mutateBook((b) => S.setBookingStatus(b, btn.dataset.cancel, "cancelled", actor(), "Cancelled"));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -600,7 +678,7 @@ function wireBookingActions(host) {
   host.querySelectorAll("[data-add-comment]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const note = host.querySelector(`[data-comment="${btn.dataset.addComment}"]`)?.value || "";
-      const result = await mutateBook((b) => S.addBookingComment(b, btn.dataset.addComment, note, session.username));
+      const result = await mutateBook((b) => S.addBookingComment(b, btn.dataset.addComment, note, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -608,7 +686,7 @@ function wireBookingActions(host) {
   host.querySelectorAll("[data-delete-booking]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("Delete this preference?")) return;
-      const result = await mutateBook((b) => S.deleteBooking(b, btn.dataset.deleteBooking, session.username));
+      const result = await mutateBook((b) => S.deleteBooking(b, btn.dataset.deleteBooking, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -640,7 +718,7 @@ function renderEvents() {
   host.querySelectorAll("[data-toggle-event]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const event = S.findEvent(book, btn.dataset.toggleEvent);
-      const result = await mutateBook((b) => S.updateEvent(b, event.id, { status: event.status === "open" ? "closed" : "open" }, session.username));
+      const result = await mutateBook((b) => S.updateEvent(b, event.id, { status: event.status === "open" ? "closed" : "open" }, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -648,40 +726,65 @@ function renderEvents() {
   host.querySelectorAll("[data-del-session]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm("Remove this evening?")) return;
-      const result = await mutateBook((b) => S.deleteSession(b, btn.dataset.delSession, session.username));
+      const result = await mutateBook((b) => S.deleteSession(b, btn.dataset.delSession, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
   });
 }
 
+function canManageAccount(target) {
+  if (!target) return false;
+  if (can("admin")) return true;
+  if (can("cultural")) return target.role === "coordinator";
+  return false;
+}
+
 function renderPeople() {
+  const roleSelect = document.querySelector("#ppl-role");
+  if (roleSelect) {
+    if (can("admin")) {
+      roleSelect.innerHTML = `
+        <option value="coordinator">Coordinator</option>
+        <option value="cultural">Cultural</option>
+        <option value="admin">Admin</option>`;
+    } else {
+      roleSelect.innerHTML = `<option value="coordinator">Coordinator</option>`;
+    }
+  }
   const host = document.querySelector("#people-list");
   const accounts = (book.accounts || []).slice().sort((a, b) => {
     if (a.status === "pending" && b.status !== "pending") return -1;
     if (b.status === "pending" && a.status !== "pending") return 1;
     return a.username.localeCompare(b.username);
   });
-  host.innerHTML = accounts.map((a) => `
-    <div class="card">
+  host.innerHTML = accounts.map((a) => {
+    const manage = canManageAccount(a);
+    const reinstate = manage && a.status === "disabled";
+    const approve = manage && a.status === "pending";
+    const disable = manage && a.status === "active";
+    return `<div class="card">
       <h3>${escapeHtml(a.username)} <span class="badge ${a.status}">${a.status}</span> · ${escapeHtml(a.role)}</h3>
       <p class="meta">${escapeHtml(a.name || "")} · ${escapeHtml(a.email || "no email")} · ${escapeHtml(a.phone || "")}</p>
       <div class="actions">
-        ${a.status !== "active" ? `<button type="button" class="btn-teal" data-activate="${a.username}">Approve login</button>` : ""}
-        ${a.status === "active" ? `<button type="button" class="btn-quiet" data-disable="${a.username}">Disable</button>` : ""}
+        ${approve ? `<button type="button" class="btn-teal" data-activate="${a.username}">Approve login</button>` : ""}
+        ${reinstate ? `<button type="button" class="btn-teal" data-activate="${a.username}">Reinstate</button>` : ""}
+        ${disable ? `<button type="button" class="btn-quiet" data-disable="${a.username}">Disable</button>` : ""}
+        ${!manage && (a.role === "cultural" || a.role === "admin") ? `<span class="muted">Protected account</span>` : ""}
         ${can("admin") && a.username !== "admin" ? `<button type="button" class="btn-danger" data-delete-user="${a.username}">Delete</button>` : ""}
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
   host.querySelectorAll("[data-activate]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const result = await mutateBook((b) => S.setAccountStatus(b, btn.dataset.activate, "active", session.username));
+      const result = await mutateBook((b) => S.setAccountStatus(b, btn.dataset.activate, "active", actor(), { actorRole: currentAccount().role }));
       flash(result.message, !result.ok);
       renderPage();
     });
   });
   host.querySelectorAll("[data-disable]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const result = await mutateBook((b) => S.setAccountStatus(b, btn.dataset.disable, "disabled", session.username));
+      const result = await mutateBook((b) => S.setAccountStatus(b, btn.dataset.disable, "disabled", actor(), { actorRole: currentAccount().role }));
       flash(result.message, !result.ok);
       renderPage();
     });
@@ -689,11 +792,19 @@ function renderPeople() {
   host.querySelectorAll("[data-delete-user]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!confirm(`Delete ${btn.dataset.deleteUser}?`)) return;
-      const result = await mutateBook((b) => S.deleteAccount(b, btn.dataset.deleteUser, session.username));
+      const result = await mutateBook((b) => S.deleteAccount(b, btn.dataset.deleteUser, actor()));
       flash(result.message, !result.ok);
       renderPage();
     });
   });
+}
+
+function renderLog() {
+  const host = document.querySelector("#log-list");
+  const rows = (book.log || []).slice(0, 200);
+  host.innerHTML = rows.length
+    ? rows.map((row) => `<div class="card"><h3>${escapeHtml(row.action)}</h3><p class="meta">${escapeHtml(row.at)} · ${escapeHtml(row.actor)}</p><p class="meta">${escapeHtml(row.detail)}</p></div>`).join("")
+    : `<p class="muted">No log entries yet.</p>`;
 }
 
 function renderStats() {
@@ -720,8 +831,8 @@ function renderStats() {
 function renderAdmin() {
   document.querySelector("#record-url").value = recordUrlValue();
   document.querySelector("#sync-status").textContent = recordUrlValue()
-    ? "Record link saved. Pull/Push syncs the shared Google file."
-    : "Using local browser storage. Download/upload JSON, or paste a Google Apps Script /exec URL.";
+    ? "Active store: Google Apps Script Drive file (plus a local browser cache). Activity log is inside that JSON book."
+    : "Active store: this browser’s localStorage. Use Download JSON to save the full book (accounts, prefs, log). Optional: paste Apps Script /exec URL to sync a Drive file across phones.";
 }
 
 function renderPage() {
@@ -733,6 +844,7 @@ function renderPage() {
   if (page === "bookings") renderBookings();
   if (page === "events") renderEvents();
   if (page === "people") renderPeople();
+  if (page === "log") renderLog();
   if (page === "stats") renderStats();
   if (page === "admin") renderAdmin();
 }
@@ -799,6 +911,12 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   await ensureBook();
   const username = document.querySelector("#username").value;
   const password = document.querySelector("#password").value;
+  const displayName = document.querySelector("#display-name").value.trim();
+  if (!displayName) {
+    err.textContent = "Enter your name for the activity log.";
+    err.hidden = false;
+    return;
+  }
   const account = S.findAccount(book, username);
   const digest = await sha256(password);
   if (!account || account.hash !== digest) {
@@ -809,11 +927,20 @@ document.querySelector("#login-form").addEventListener("submit", async (event) =
   if (account.status !== "active") {
     err.textContent = account.status === "pending"
       ? "Cultural team has not approved your account yet. You cannot book until then."
-      : "This account is disabled.";
+      : "This account is disabled. Ask cultural or admin to reinstate you.";
     err.hidden = false;
     return;
   }
-  saveSession({ username: account.username, role: account.role, exp: Date.now() + SESSION_MS });
+  saveSession({
+    username: account.username,
+    role: account.role,
+    displayName,
+    exp: Date.now() + SESSION_MS,
+  });
+  await mutateBook((b) => {
+    S.pushLog(b, "login", `${displayName} (${account.username})`, `Signed in as ${account.role}`);
+    return { ok: true, message: "Logged in." };
+  }, { allowLocalFallback: true });
   await enterWorkspace();
 });
 
@@ -835,7 +962,7 @@ document.querySelector("#group-form").addEventListener("submit", async (event) =
     contactEmail: document.querySelector("#grp-email").value || account.email,
     specialRequirements: document.querySelector("#grp-reqs").value,
     coordinatorUsername: coord,
-  }, account.username));
+  }, actor()));
   flash(result.message, !result.ok);
   if (result.ok) {
     event.target.reset();
@@ -861,7 +988,7 @@ document.querySelector("#submit-prefs").addEventListener("click", async () => {
     pointOfContact: document.querySelector("#cal-poc").value,
     specialRequirements: document.querySelector("#cal-reqs").value,
     preferences: draftPrefs,
-  }, session.username));
+  }, actor()));
   flash(result.message, !result.ok);
   if (result.ok) {
     draftPrefs = [];
@@ -881,7 +1008,7 @@ document.querySelector("#event-form").addEventListener("submit", async (event) =
     name: document.querySelector("#evt-name").value,
     maxSlotsPerGroup: document.querySelector("#evt-max").value,
     description: document.querySelector("#evt-desc").value,
-  }, session.username));
+  }, actor()));
   flash(result.message, !result.ok);
   if (result.ok) event.target.reset();
   renderPage();
@@ -896,7 +1023,7 @@ document.querySelector("#session-form").addEventListener("submit", async (event)
     start: document.querySelector("#sess-start").value,
     end: document.querySelector("#sess-end").value,
     notes: document.querySelector("#sess-notes").value,
-  }, session.username));
+  }, actor()));
   flash(result.message, !result.ok);
   renderPage();
 });
@@ -917,17 +1044,34 @@ document.querySelector("#people-form").addEventListener("submit", async (event) 
     flash("Only admin can create admin accounts.", true);
     return;
   }
-  const result = await mutateBook((b) => S.upsertAccount(b, payload, session.username));
+  const result = await mutateBook((b) => S.upsertAccount(b, payload, actor(), { actorRole: currentAccount().role }));
   flash(result.message, !result.ok);
   renderPage();
 });
 
 document.querySelector("#cal-event").addEventListener("change", () => {
   draftPrefs = [];
+  selectedCalDate = "";
   fillGroupSelect();
   renderCalendar();
 });
 document.querySelector("#cal-group").addEventListener("change", () => renderCalendar());
+document.querySelector("#cal-prev").addEventListener("click", () => {
+  calView.month -= 1;
+  if (calView.month < 0) {
+    calView.month = 11;
+    calView.year -= 1;
+  }
+  renderCalendar();
+});
+document.querySelector("#cal-next").addEventListener("click", () => {
+  calView.month += 1;
+  if (calView.month > 11) {
+    calView.month = 0;
+    calView.year += 1;
+  }
+  renderCalendar();
+});
 document.querySelector("#stats-window").addEventListener("change", renderStats);
 
 document.querySelector("#save-record-url").addEventListener("click", () => {
@@ -1017,8 +1161,13 @@ document.querySelector("#reset-seed").addEventListener("click", async () => {
     maps.textContent = address ? `${name.replace(/ Gym$/i, "")} · ${address}` : name.replace(/ Gym$/i, "");
   }
   await ensureBook();
+  const savedAlias = localStorage.getItem(ALIAS_KEY) || "";
+  if (savedAlias && document.querySelector("#display-name")) {
+    document.querySelector("#display-name").value = savedAlias;
+  }
   session = loadSession();
   if (session) {
+    if (!session.displayName && savedAlias) session.displayName = savedAlias;
     const account = S.findAccount(book, session.username);
     if (account && account.status === "active") await enterWorkspace();
     else {

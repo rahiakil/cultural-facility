@@ -77,7 +77,7 @@
       actor: cleanText(actor, 60),
       detail: cleanText(detail, 400),
     });
-    if (book.log.length > 500) book.log.length = 500;
+    if (book.log.length > 2000) book.log.length = 2000;
   }
 
   function findAccount(book, username) {
@@ -236,20 +236,36 @@
     };
   }
 
-  function setAccountStatus(book, username, status, actor) {
+  function setAccountStatus(book, username, status, actor, options) {
     const account = findAccount(book, username);
     if (!account) return { ok: false, message: "Account not found." };
     if (!["active", "pending", "disabled"].includes(status)) return { ok: false, message: "Bad status." };
+    const actorRole = options && options.actorRole;
+    if (actorRole === "cultural" && account.role !== "coordinator") {
+      return { ok: false, message: "Cultural login can only approve, disable, or reinstate coordinators — not cultural or admin accounts." };
+    }
+    if (status === "disabled" && account.role === "admin" && actorRole !== "admin") {
+      return { ok: false, message: "Only admin can disable an admin account." };
+    }
+    const previous = account.status;
     account.status = status;
-    pushLog(book, "account-status", actor, `${username} → ${status}`);
-    return { ok: true, message: `Updated ${username}.`, account };
+    const verb = status === "active" && previous === "disabled" ? "reinstated" : status === "active" ? "approved" : status;
+    pushLog(book, "account-status", actor, `${username} (${account.role}) ${previous} → ${status}`);
+    return { ok: true, message: `${username} ${verb}.`, account };
   }
 
-  function upsertAccount(book, input, actor) {
+  function upsertAccount(book, input, actor, options) {
     const username = cleanUsername(input.username);
     if (!username) return { ok: false, message: "Username required." };
     let account = findAccount(book, username);
     const role = ["coordinator", "cultural", "admin"].includes(input.role) ? input.role : "coordinator";
+    const actorRole = options && options.actorRole;
+    if (actorRole === "cultural" && role !== "coordinator") {
+      return { ok: false, message: "Cultural login can only create or edit coordinator accounts." };
+    }
+    if (actorRole === "cultural" && account && account.role !== "coordinator") {
+      return { ok: false, message: "Cultural login cannot edit cultural or admin accounts." };
+    }
     if (!account) {
       if (!input.hash) return { ok: false, message: "Password required for new account." };
       account = {
@@ -271,9 +287,14 @@
     if (input.name != null) account.name = cleanText(input.name, 80) || account.name;
     if (input.email != null) account.email = cleanText(input.email, 120);
     if (input.phone != null) account.phone = cleanText(input.phone, 40);
-    if (input.role) account.role = role;
-    if (input.status) account.status = input.status;
-    pushLog(book, "account-update", actor, `Updated ${username}`);
+    if (input.role && actorRole === "admin") account.role = role;
+    if (input.status) {
+      if (actorRole === "cultural" && account.role !== "coordinator") {
+        return { ok: false, message: "Cultural login cannot change status of cultural or admin accounts." };
+      }
+      account.status = input.status;
+    }
+    pushLog(book, "account-update", actor, `Updated ${username} (${account.role}, ${account.status})`);
     return { ok: true, message: `Saved ${username}.`, account };
   }
 
@@ -704,6 +725,7 @@
     seedBook,
     normalizeBook,
     newId,
+    pushLog,
     hourSlots,
     startOptions,
     durationOptions,
