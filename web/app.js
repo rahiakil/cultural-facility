@@ -980,7 +980,9 @@ document.querySelector("#reset-seed").addEventListener("click", async () => {
   const maps = document.querySelector("#facility-maps");
   if (maps && config.facilityMapsUrl) {
     maps.href = config.facilityMapsUrl;
-    maps.textContent = config.facilityAddress || maps.textContent;
+    const name = config.facilityName || "Samantha Smith Elementary";
+    const address = config.facilityAddress || "";
+    maps.textContent = address ? `${name.replace(/ Gym$/i, "")} · ${address}` : name.replace(/ Gym$/i, "");
   }
   await ensureBook();
   session = loadSession();
