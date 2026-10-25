@@ -33,10 +33,9 @@ function readBook_() {
         name: "Samantha Smith Elementary Gym",
         address: "23305 NE 14th St, Sammamish, WA 98074",
         mapsUrl: "https://share.google/C8C33ynszqGr7fR40",
-        sessionCost: 70,
         sessionHours: 3
       },
-      settings: { defaultMaxSlotsPerGroup: 4 },
+      settings: { defaultMaxSlotsPerGroup: 6, maxSessionsPerYear: 28 },
       accounts: [],
       events: [],
       sessions: [],

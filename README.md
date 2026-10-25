@@ -31,7 +31,7 @@ New coordinators register from the landing page. Status starts as **pending** un
 2. After approval, coordinator creates a **team** with a required **program comment** (which event/segment).
 3. Admin/cultural publish candidate **6–9 PM evenings** under an event (seeded: **Boishakhi 2027**).
 4. Coordinator picks **multiple preferred dates**, each with start time and length in **15-minute** steps inside 6–9 PM, then submits them all.
-5. Cultural **Demand** page shows how many preferences landed on each evening. When enough, they **Book facility** for that night, then **Approve** teams — approved dates **light up green** on the coordinator calendar.
+5. Cultural **Demand** page shows preference demand. Approving a time (or booking the evening) updates the **yearly facility session counter** (cap **28 / year**). Approved dates **light up green** on the coordinator calendar. Usage cost is internal only and is not shown in the app.
 
 ## File-based storage (same idea as ticket tracker)
 

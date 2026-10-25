@@ -14,10 +14,9 @@
     return {
       schemaVersion: 2,
       facility: {
-        name: "Samantha Smith Elementary Gym",
+        name: "Samantha Smith Elementary",
         address: "23305 NE 14th St, Sammamish, WA 98074",
         mapsUrl: "https://share.google/C8C33ynszqGr7fR40",
-        sessionCost: 70,
         sessionHours: 3,
         windowStart: WINDOW_START,
         windowEnd: WINDOW_END,
@@ -29,6 +28,7 @@
         cancelNoticeHours: 72,
         requestLeadDays: 14,
         minDemandToBook: 1,
+        maxSessionsPerYear: 28,
       },
       accounts: [],
       events: [],
@@ -346,14 +346,60 @@
     return { ok: true, message: "Preference evening added.", session };
   }
 
+  function yearFromDate(date) {
+    const y = Number(String(date || "").slice(0, 4));
+    return Number.isFinite(y) ? y : new Date().getFullYear();
+  }
+
+  function maxSessionsPerYear(book) {
+    return Math.max(1, Number(book.settings && book.settings.maxSessionsPerYear) || 28);
+  }
+
+  /** Count facility evenings already used in a calendar year (internal yearly cap). */
+  function yearSessionUsage(book, year) {
+    const y = Number(year) || new Date().getFullYear();
+    const max = maxSessionsPerYear(book);
+    const usedSessions = (book.sessions || []).filter((s) => {
+      if (yearFromDate(s.date) !== y) return false;
+      return s.facilityBooked || s.status === "booked";
+    });
+    const used = usedSessions.length;
+    return {
+      year: y,
+      used,
+      max,
+      remaining: Math.max(0, max - used),
+      atLimit: used >= max,
+      label: `${used} / ${max} facility sessions in ${y}`,
+    };
+  }
+
   function bookFacilitySession(book, sessionId, actor, note) {
     const session = findSession(book, sessionId);
     if (!session) return { ok: false, message: "Evening not found." };
+    if (session.facilityBooked || session.status === "booked") {
+      const usage = yearSessionUsage(book, yearFromDate(session.date));
+      return { ok: true, message: `Already booked. ${usage.label} (${usage.remaining} left).`, session, usage };
+    }
+    const usageBefore = yearSessionUsage(book, yearFromDate(session.date));
+    if (usageBefore.atLimit) {
+      return {
+        ok: false,
+        message: `Yearly facility limit reached (${usageBefore.label}). Cannot book another evening.`,
+        usage: usageBefore,
+      };
+    }
     session.facilityBooked = true;
     session.status = "booked";
     if (note) session.notes = cleanText(note, 300);
     pushLog(book, "facility-book", actor, `${session.date} ${session.start}-${session.end}`);
-    return { ok: true, message: `Facility rental marked booked for ${session.date}.`, session };
+    const usage = yearSessionUsage(book, yearFromDate(session.date));
+    return {
+      ok: true,
+      message: `Facility booked for ${session.date}. Counter: ${usage.label} (${usage.remaining} left this year).`,
+      session,
+      usage,
+    };
   }
 
   function deleteSession(book, sessionId, actor) {
@@ -529,6 +575,19 @@
     if (!booking) return { ok: false, message: "Preference not found." };
     migrateBooking(booking, book);
     if (!BOOKING_STATUSES.includes(status)) return { ok: false, message: "Bad status." };
+
+    let usage = yearSessionUsage(book, yearFromDate(booking.date));
+    if (status === "approved") {
+      const sess = findSession(book, booking.sessionId) || (book.sessions || []).find((s) => s.date === booking.date && s.eventId === booking.eventId);
+      if (sess && !(sess.facilityBooked || sess.status === "booked")) {
+        const booked = bookFacilitySession(book, sess.id, actor, "Auto-booked when preference approved");
+        if (!booked.ok) return booked;
+        usage = booked.usage || yearSessionUsage(book, yearFromDate(booking.date));
+      } else {
+        usage = yearSessionUsage(book, yearFromDate(booking.date));
+      }
+    }
+
     booking.status = status;
     booking.reviewedBy = cleanUsername(actor);
     booking.reviewedAt = nowIso();
@@ -541,7 +600,15 @@
       });
     }
     pushLog(book, "booking-status", actor, `${bookingId} → ${status}`);
-    return { ok: true, message: status === "approved" ? "Approved — coordinator calendar will light up." : `Preference ${status}.`, booking };
+    if (status === "approved") {
+      return {
+        ok: true,
+        message: `Approved — calendar lights up. Counter: ${usage.label} (${usage.remaining} left this year).`,
+        booking,
+        usage,
+      };
+    }
+    return { ok: true, message: `Preference ${status}.`, booking, usage };
   }
 
   function addBookingComment(book, bookingId, text, actor) {
@@ -657,6 +724,9 @@
     updateEvent,
     createSession,
     bookFacilitySession,
+    yearSessionUsage,
+    maxSessionsPerYear,
+    yearFromDate,
     deleteSession,
     createGroup,
     updateGroup,

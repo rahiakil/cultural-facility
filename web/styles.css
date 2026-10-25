@@ -340,6 +340,17 @@ label textarea { min-height: 88px; resize: vertical; }
   margin-top: 4px;
 }
 
+.stat.at-limit {
+  border-color: #f1c0b0;
+  background: #fdece7;
+}
+
+.stat.at-limit strong { color: var(--bad); }
+
+#session-counter {
+  margin-bottom: 14px;
+}
+
 .comments {
   margin: 8px 0 0;
   padding: 0;

@@ -28,9 +28,9 @@ const POLICY_HTML = `
 <p>Uttoron promotes Bengali culture and performing arts. Affordable rehearsal space is shared with community cultural groups under school availability and this policy.</p>
 <h3>Facility</h3>
 <ul>
-  <li>Anticipated cost about $70 per three-hour session (setup, rehearsal, cleanup, departure).</li>
   <li>Evening hours 6–9 PM; preferences in 15-minute steps.</li>
   <li>Uttoron books the gym centrally when cultural sees enough demand—groups may not extend or transfer bookings.</li>
+  <li>Facility evenings are capped for the year; cultural team sees the session counter when approving times.</li>
 </ul>
 <h3>Eligible activities</h3>
 <p>Children’s/youth dance, musical ensembles, Bengali plays, recitation, adult/intergenerational cultural performances.</p>
@@ -281,11 +281,19 @@ function renderHome() {
     const g = S.findGroup(book, b.groupId);
     return g && g.coordinatorUsername === account.username;
   }).length;
+  const years = new Set((book.sessions || []).map((s) => S.yearFromDate(s.date)));
+  years.add(new Date().getFullYear());
+  const counterStats = can("cultural")
+    ? [...years].sort().map((y) => {
+      const u = S.yearSessionUsage(book, y);
+      return `<div class="stat${u.atLimit ? " at-limit" : ""}"><span class="muted">${y} sessions</span><strong>${u.used} / ${u.max}</strong></div>`;
+    }).join("")
+    : `<div class="stat"><span class="muted">Your teams</span><strong>${teams}</strong></div>`;
   document.querySelector("#home-stats").innerHTML = `
     <div class="stat"><span class="muted">Pending logins</span><strong>${pendingPeople}</strong></div>
     <div class="stat"><span class="muted">Pending prefs</span><strong>${pendingPrefs}</strong></div>
     <div class="stat"><span class="muted">Approved (lit)</span><strong>${approved}</strong></div>
-    <div class="stat"><span class="muted">Your teams</span><strong>${teams}</strong></div>
+    ${counterStats}
   `;
 
   let rows = book.bookings || [];
@@ -466,11 +474,28 @@ function renderGroups() {
   });
 }
 
+function renderSessionCounter(focusYear) {
+  const host = document.querySelector("#session-counter");
+  if (!host) return null;
+  const years = new Set((book.sessions || []).map((s) => S.yearFromDate(s.date)));
+  years.add(focusYear || new Date().getFullYear());
+  const sorted = [...years].sort();
+  host.innerHTML = sorted.map((year) => {
+    const usage = S.yearSessionUsage(book, year);
+    return `<div class="stat${usage.atLimit ? " at-limit" : ""}">
+      <span class="muted">${year} facility sessions</span>
+      <strong>${usage.used} / ${usage.max}</strong>
+      <span class="muted">${usage.remaining} remaining</span>
+    </div>`;
+  }).join("");
+  return S.yearSessionUsage(book, focusYear || sorted[sorted.length - 1]);
+}
+
 function renderApprovals() {
   const demandHost = document.querySelector("#demand-list");
-  const eventId = (book.events || []).find((e) => e.status === "open")?.id;
   const demand = S.demandByDate(book, null);
   const sessions = book.sessions || [];
+  renderSessionCounter();
 
   if (!demand.length && !sessions.length) {
     demandHost.innerHTML = `<p class="muted">No preferences yet.</p>`;
@@ -483,11 +508,15 @@ function renderApprovals() {
       const row = demand.find((d) => d.date === date) || { pending: 0, approved: 0, total: 0 };
       const sess = sessions.find((s) => s.date === date);
       const booked = sess && (sess.facilityBooked || sess.status === "booked");
+      const usage = S.yearSessionUsage(book, S.yearFromDate(date));
+      const blockBook = !booked && usage.atLimit;
       return `<div class="card">
         <h3>${escapeHtml(formatDate(date))}</h3>
         <p class="meta">${sess ? `${sess.start}–${sess.end}` : "no evening configured"} · pending <span class="demand-count">${row.pending || 0}</span> · approved ${row.approved || 0}</p>
+        <p class="meta">Year counter: ${usage.label}</p>
         <div class="actions">
-          ${sess && !booked ? `<button type="button" class="btn-orange" data-book-facility="${sess.id}">Book facility (6–9 PM)</button>` : ""}
+          ${sess && !booked && !blockBook ? `<button type="button" class="btn-orange" data-book-facility="${sess.id}">Book facility evening</button>` : ""}
+          ${blockBook ? `<span class="badge rejected">yearly limit reached</span>` : ""}
           ${booked ? `<span class="badge approved">facility booked</span>` : ""}
         </div>
       </div>`;
@@ -536,7 +565,7 @@ function bookingCard(b, manage) {
     ${comments ? `<ul class="comments">${comments}</ul>` : ""}
     ${manage ? `<label>Comment<textarea data-comment="${b.id}"></textarea></label>
       <div class="actions">
-        ${b.status === "pending" ? `<button type="button" class="btn-teal" data-approve="${b.id}">Approve (light up)</button><button type="button" class="btn-danger" data-reject="${b.id}">Reject</button>` : ""}
+        ${b.status === "pending" ? `<button type="button" class="btn-teal" data-approve="${b.id}">Approve time (counts session)</button><button type="button" class="btn-danger" data-reject="${b.id}">Reject</button>` : ""}
         <button type="button" class="btn-quiet" data-add-comment="${b.id}">Add comment</button>
         ${can("admin") ? `<button type="button" class="btn-danger" data-delete-booking="${b.id}">Delete</button>` : ""}
         ${b.status === "pending" || b.status === "approved" ? `<button type="button" class="btn-quiet" data-cancel="${b.id}">Cancel</button>` : ""}
@@ -670,12 +699,15 @@ function renderPeople() {
 function renderStats() {
   const days = Number(document.querySelector("#stats-window").value || 30);
   const data = S.stats(book, days);
+  const year = new Date().getFullYear();
+  const usage = S.yearSessionUsage(book, year);
+  const nextYearUsage = S.yearSessionUsage(book, year + 1);
   document.querySelector("#stats-grid").innerHTML = `
+    <div class="stat"><span class="muted">${usage.year} session counter</span><strong>${usage.used} / ${usage.max}</strong></div>
+    <div class="stat"><span class="muted">${usage.year} remaining</span><strong>${usage.remaining}</strong></div>
+    <div class="stat"><span class="muted">${nextYearUsage.year} booked</span><strong>${nextYearUsage.used} / ${nextYearUsage.max}</strong></div>
     <div class="stat"><span class="muted">Evenings offered</span><strong>${data.sessionsBooked}</strong></div>
-    <div class="stat"><span class="muted">Facility booked</span><strong>${data.facilityBooked}</strong></div>
     <div class="stat"><span class="muted">Prefs approved</span><strong>${data.usedSlots}</strong></div>
-    <div class="stat"><span class="muted">Unused evenings</span><strong>${data.unusedSlots}</strong></div>
-    <div class="stat"><span class="muted">Utilization</span><strong>${data.utilization}%</strong></div>
     <div class="stat"><span class="muted">All requests</span><strong>${data.bookingCount}</strong></div>
   `;
   const body = document.querySelector("#stats-coords");
